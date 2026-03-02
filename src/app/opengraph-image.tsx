@@ -43,18 +43,48 @@ export default async function Image() {
           padding: '60px',
         }}
       >
-        {/* Title: SLUICE */}
+        {/* Logo + Title lockup */}
         <div
           style={{
-            fontSize: 96,
-            fontFamily: 'Inter Bold',
-            fontWeight: 700,
-            color: '#fafafa',
-            letterSpacing: '0.25em',
-            lineHeight: 1,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 32,
           }}
         >
-          {titleText}
+          {/* Sluice logo */}
+          <svg
+            width="88"
+            height="88"
+            viewBox="0 0 100 100"
+          >
+            <defs>
+              <linearGradient id="og-bg" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stopColor="#333333" />
+                <stop offset="50%" stopColor="#333333" />
+                <stop offset="50%" stopColor="#2a2a2a" />
+                <stop offset="100%" stopColor="#2a2a2a" />
+              </linearGradient>
+              <radialGradient id="og-glow" cx="55%" cy="50%" r="35%">
+                <stop offset="0%" stopColor="rgba(5, 150, 105, 0.35)" />
+                <stop offset="100%" stopColor="rgba(5, 150, 105, 0)" />
+              </radialGradient>
+            </defs>
+            <circle cx="50" cy="50" r="50" fill="url(#og-bg)" />
+            <circle cx="55" cy="50" r="35" fill="url(#og-glow)" />
+            <path d="M37 20 L82 50 L37 80 Z" fill="#059669" />
+          </svg>
+          <div
+            style={{
+              fontSize: 96,
+              fontFamily: 'Inter Bold',
+              fontWeight: 700,
+              color: '#fafafa',
+              letterSpacing: '0.25em',
+              lineHeight: 1,
+            }}
+          >
+            {titleText}
+          </div>
         </div>
 
         {/* Teal accent line */}

@@ -3,7 +3,8 @@
 import { Suspense, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { Pickaxe, Search, Sparkles, Users } from 'lucide-react'
+import { Search, Sparkles, Users } from 'lucide-react'
+import { SluiceLogo } from '@/components/icons/SluiceLogo'
 import { signIn, signOut, useSession } from '@/lib/auth-client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -67,8 +68,8 @@ function SignInContent() {
     return (
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-            <Pickaxe className="h-6 w-6 text-primary" />
+          <div className="flex justify-center mb-2">
+            <SluiceLogo size={36} />
           </div>
           <CardTitle>Welcome back</CardTitle>
           <CardDescription>
@@ -96,10 +97,10 @@ function SignInContent() {
   return (
     <div className="w-full max-w-md space-y-8">
       <div className="text-center space-y-3">
-        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
-          <Pickaxe className="h-8 w-8 text-primary" />
+        <div className="flex items-center justify-center gap-3">
+          <SluiceLogo size={36} />
+          <h1 className="text-3xl font-bold tracking-tight">Sluice</h1>
         </div>
-        <h1 className="text-3xl font-bold tracking-tight">Sluice</h1>
         <p className="text-muted-foreground text-lg">
           Extract knowledge from YouTube videos into a searchable knowledge bank.
         </p>

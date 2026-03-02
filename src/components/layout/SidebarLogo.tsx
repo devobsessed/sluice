@@ -1,6 +1,7 @@
-import { Pickaxe, ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useSidebar } from '@/components/providers/SidebarProvider'
 import { Button } from '@/components/ui/button'
+import { SluiceLogo } from '@/components/icons/SluiceLogo'
 
 interface SidebarLogoProps {
   collapsed?: boolean
@@ -11,7 +12,7 @@ export function SidebarLogo({ collapsed = false }: SidebarLogoProps) {
 
   return (
     <div className={`flex items-center py-5 ${collapsed ? 'flex-col gap-1 px-2' : 'gap-2 px-4'}`}>
-      <Pickaxe className="h-6 w-6 text-primary shrink-0" />
+      <SluiceLogo size={24} className="shrink-0" />
       {!collapsed && (
         <span className="text-lg font-semibold overflow-hidden whitespace-nowrap flex-1">
           Sluice
