@@ -62,7 +62,8 @@
       "mcp__plugin_craft_chrome-devtools__get_console_message",
       "mcp__plugin_craft_chrome-devtools__close_page",
       "mcp__plugin_craft_chrome-devtools__fill",
-      "mcp__claude-persona__search_knowledge"
+      "mcp__claude-persona__search_knowledge",
+      "WebFetch(domain:darinbuilds.com)"
     ]
   }
 }
