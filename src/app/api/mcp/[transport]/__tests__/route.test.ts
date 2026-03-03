@@ -134,6 +134,34 @@ describe('MCP Route Handler', () => {
       expect(mockVerifyAccessToken).not.toHaveBeenCalled()
     })
 
+    it('includes WWW-Authenticate header on 401 (no token)', async () => {
+      const request = new Request('http://localhost:3000/api/mcp/mcp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2024-11-05',
+            capabilities: {},
+            clientInfo: { name: 'test-client', version: '1.0.0' },
+          },
+        }),
+      })
+
+      const response = await routeModule.POST(request)
+      expect(response.status).toBe(401)
+      const wwwAuth = response.headers.get('WWW-Authenticate')
+      expect(wwwAuth).toBeTruthy()
+      expect(wwwAuth).toContain('Bearer')
+      expect(wwwAuth).toContain('resource_metadata=')
+      expect(wwwAuth).toContain('/.well-known/oauth-protected-resource')
+    })
+
     it('allows authenticated requests through to MCP handler in production', async () => {
       mockVerifyAccessToken.mockResolvedValue({ sub: 'user-1', scope: 'openid' })
 
@@ -209,6 +237,37 @@ describe('MCP Route Handler', () => {
 
       const body = await response.json()
       expect(body.error).toBe('Unauthorized')
+    })
+
+    it('includes WWW-Authenticate header on 401 (invalid token)', async () => {
+      mockVerifyAccessToken.mockRejectedValue(new Error('Token expired'))
+
+      const request = new Request('http://localhost:3000/api/mcp/mcp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream',
+          'Authorization': 'Bearer expired-token',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2024-11-05',
+            capabilities: {},
+            clientInfo: { name: 'test-client', version: '1.0.0' },
+          },
+        }),
+      })
+
+      const response = await routeModule.POST(request)
+      expect(response.status).toBe(401)
+      const wwwAuth = response.headers.get('WWW-Authenticate')
+      expect(wwwAuth).toBeTruthy()
+      expect(wwwAuth).toContain('Bearer')
+      expect(wwwAuth).toContain('resource_metadata=')
+      expect(wwwAuth).toContain('/.well-known/oauth-protected-resource')
     })
 
     it('adds Accept header when missing for authenticated requests', async () => {

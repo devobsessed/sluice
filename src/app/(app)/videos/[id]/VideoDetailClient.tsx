@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import { VideoPlayer } from '@/components/videos/VideoPlayer'
 import { VideoMetadata } from '@/components/videos/VideoMetadata'
 import { InsightsTabs } from '@/components/insights/InsightsTabs'
@@ -16,7 +16,6 @@ interface VideoDetailClientProps {
 }
 
 export function VideoDetailClient({ video: initialVideo }: VideoDetailClientProps) {
-  const router = useRouter()
   const searchParams = useSearchParams()
   // Use server-provided video directly — no client-side fetch needed
   const video = initialVideo

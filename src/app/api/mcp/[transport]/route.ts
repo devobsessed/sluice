@@ -55,6 +55,7 @@ async function wrappedHandler(request: Request): Promise<Response> {
   // In production, verify OAuth access token via better-auth/oauth2
   // In development, skip auth so local MCP tools work without OAuth setup
   if (process.env.NODE_ENV === 'production') {
+    const authUrl = process.env.BETTER_AUTH_URL ?? ''
     const authorization = request.headers.get('authorization')
     const accessToken = authorization?.startsWith('Bearer ')
       ? authorization.slice(7)
@@ -63,12 +64,14 @@ async function wrappedHandler(request: Request): Promise<Response> {
     if (!accessToken) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'WWW-Authenticate': `Bearer resource_metadata="${authUrl}/.well-known/oauth-protected-resource"`,
+        },
       })
     }
 
     try {
-      const authUrl = process.env.BETTER_AUTH_URL ?? ''
       await verifyAccessToken(accessToken, {
         verifyOptions: {
           issuer: authUrl,
@@ -78,7 +81,10 @@ async function wrappedHandler(request: Request): Promise<Response> {
     } catch {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'WWW-Authenticate': `Bearer resource_metadata="${authUrl}/.well-known/oauth-protected-resource"`,
+        },
       })
     }
   }
