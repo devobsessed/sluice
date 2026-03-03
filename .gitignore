@@ -54,3 +54,4 @@ next-env.d.ts
 # stale artifacts
 *.db
 .code-captain/
+.claude/settings.local.json
