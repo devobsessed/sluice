@@ -15,7 +15,7 @@ import { getSessionCookie } from 'better-auth/cookies'
  * API requests without a session return 401 JSON.
  */
 
-const PUBLIC_PAGE_PATHS = ['/sign-in', '/opengraph-image', '/twitter-image']
+const PUBLIC_PAGE_PATHS = ['/sign-in', '/consent', '/opengraph-image', '/twitter-image']
 
 const PUBLIC_API_PREFIXES = ['/api/auth', '/.well-known', '/api/cron']
 
