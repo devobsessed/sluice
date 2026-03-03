@@ -9,8 +9,8 @@ interface VideoDetailPageProps {
 }
 
 async function getVideo(id: string) {
-  const videoId = parseInt(id, 10)
-  if (isNaN(videoId)) return null
+  if (!/^\d+$/.test(id)) return null
+  const videoId = Number(id)
 
   const result = await db
     .select()

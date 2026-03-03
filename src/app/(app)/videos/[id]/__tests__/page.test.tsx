@@ -136,7 +136,8 @@ describe('generateMetadata', () => {
       params: Promise.resolve({ id: '1' }),
     })
 
-    expect(metadata.twitter?.card).toBe('summary_large_image')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((metadata.twitter as any)?.card).toBe('summary_large_image')
   })
 
   it('omits OG image for videos without thumbnails (transcript entries)', async () => {
@@ -152,7 +153,8 @@ describe('generateMetadata', () => {
     })
 
     expect(metadata.openGraph?.images).toBeUndefined()
-    expect(metadata.twitter?.card).toBe('summary')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((metadata.twitter as any)?.card).toBe('summary')
   })
 
   it('returns fallback title for missing video', async () => {
@@ -172,6 +174,15 @@ describe('generateMetadata', () => {
 
     expect(metadata.title).toBe('Video Not Found | Sluice')
     // Should not even attempt DB query for non-numeric ID
+    expect(mockFrom).not.toHaveBeenCalled()
+  })
+
+  it('rejects mixed alphanumeric IDs like "1abc"', async () => {
+    const metadata = await generateMetadata({
+      params: Promise.resolve({ id: '1abc' }),
+    })
+
+    expect(metadata.title).toBe('Video Not Found | Sluice')
     expect(mockFrom).not.toHaveBeenCalled()
   })
 
