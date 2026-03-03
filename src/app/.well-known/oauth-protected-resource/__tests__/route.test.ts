@@ -59,7 +59,7 @@ describe('OAuth Protected Resource Metadata Route', () => {
       const response = await GET()
       const body = await response.json()
       expect(body).toHaveProperty('authorization_servers')
-      expect(body.authorization_servers).toEqual([`${baseUrl}/api/auth`])
+      expect(body.authorization_servers).toEqual([baseUrl])
     })
 
     it('GET returns JSON with bearer_methods_supported field', async () => {

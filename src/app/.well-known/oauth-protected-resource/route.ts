@@ -27,7 +27,7 @@ export async function GET(): Promise<Response> {
 
   const metadata = {
     resource: authUrl,
-    authorization_servers: [`${authUrl}/api/auth`],
+    authorization_servers: [authUrl],
     bearer_methods_supported: ['header'],
   }
 

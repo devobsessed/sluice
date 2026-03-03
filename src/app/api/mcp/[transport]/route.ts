@@ -74,9 +74,10 @@ async function wrappedHandler(request: Request): Promise<Response> {
     try {
       await verifyAccessToken(accessToken, {
         verifyOptions: {
-          issuer: authUrl,
+          issuer: `${authUrl}/api/auth`,
           audience: authUrl,
         },
+        jwksUrl: `${authUrl}/api/auth/jwks`,
       })
     } catch {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
