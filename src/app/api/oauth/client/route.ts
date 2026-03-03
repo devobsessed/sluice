@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server'
 import { eq } from 'drizzle-orm'
+import { z } from 'zod'
 import { db, oauthClient } from '@/lib/db'
 import { startApiTimer } from '@/lib/api-timing'
 import { requireSession } from '@/lib/auth-guards'
+
+const querySchema = z.object({
+  client_id: z.string().min(1, 'Missing required query parameter: client_id'),
+})
 
 export async function GET(request: Request) {
   const denied = await requireSession()
@@ -11,15 +16,19 @@ export async function GET(request: Request) {
   const timer = startApiTimer('/api/oauth/client', 'GET')
 
   const { searchParams } = new URL(request.url)
-  const clientId = searchParams.get('client_id')
+  const parsed = querySchema.safeParse({
+    client_id: searchParams.get('client_id') ?? '',
+  })
 
-  if (!clientId || clientId.trim() === '') {
+  if (!parsed.success) {
     timer.end(400)
     return NextResponse.json(
-      { error: 'Missing required query parameter: client_id' },
+      { error: parsed.error.issues[0]?.message ?? 'Invalid request' },
       { status: 400 },
     )
   }
+
+  const clientId = parsed.data.client_id
 
   try {
     const results = await db
