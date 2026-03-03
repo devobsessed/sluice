@@ -1,20 +1,15 @@
 /**
  * Video Detail Page Tests
  *
- * Note: The video detail page uses React's `use()` hook for async params,
- * which makes direct component testing challenging with the current Vitest setup.
- *
- * The returnTo functionality is thoroughly tested via:
- * 1. Navigation utility functions (src/lib/__tests__/navigation.test.ts) - 21 passing tests
- * 2. VideoCard component (src/components/videos/__tests__/VideoCard.test.tsx) - includes returnTo prop tests
- *
- * This file contains integration-style tests to verify the page correctly
- * uses the returnTo parameter for navigation.
+ * Tests for:
+ * 1. returnTo behavior (existing tests, preserved)
+ * 2. generateMetadata output (new tests for server component)
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { parseReturnTo } from '@/lib/navigation'
 
+// --- Existing returnTo tests (preserved verbatim) ---
 describe('VideoDetailPage returnTo behavior', () => {
   it('parseReturnTo correctly validates KB with search params', () => {
     const returnTo = parseReturnTo('/?q=react')
@@ -54,15 +49,157 @@ describe('VideoDetailPage returnTo behavior', () => {
   })
 })
 
-/**
- * Manual verification checklist:
- *
- * ✅ VideoCard passes returnTo to detail link (tested in VideoCard.test.tsx)
- * ✅ KnowledgeBankContent computes returnTo via buildReturnTo (code review: line 60)
- * ✅ KnowledgeBankContent passes returnTo to VideoGrid (code review: line 254)
- * ✅ VideoGrid passes returnTo to VideoCard (code review: line 62)
- * ✅ VideoDetailPage reads returnTo via parseReturnTo (code review: line 31)
- * ✅ VideoDetailPage uses returnTo for backHref (code review: lines 77-78)
- * ✅ VideoDetailPage uses returnTo for error state (code review: lines 113-114)
- * ✅ Navigation utilities fully tested (21 passing tests)
- */
+// --- New generateMetadata tests ---
+
+// Mock next/navigation (notFound throws like Next.js does)
+vi.mock('next/navigation', () => ({
+  notFound: vi.fn(() => { throw new Error('NEXT_NOT_FOUND') }),
+  useRouter: vi.fn(() => ({ push: vi.fn() })),
+  useSearchParams: vi.fn(() => new URLSearchParams()),
+}))
+
+// Mock drizzle db module
+const mockFrom = vi.fn()
+const mockWhere = vi.fn()
+const mockLimit = vi.fn()
+
+vi.mock('@/lib/db', () => ({
+  db: {
+    select: () => ({ from: mockFrom }),
+  },
+  videos: { id: 'id' },
+}))
+
+vi.mock('drizzle-orm', () => ({
+  eq: vi.fn((col, val) => ({ col, val })),
+}))
+
+// Chain the query builder mocks
+beforeEach(() => {
+  vi.clearAllMocks()
+  mockFrom.mockReturnValue({ where: mockWhere })
+  mockWhere.mockReturnValue({ limit: mockLimit })
+})
+
+// Import after mocks are set up
+const { generateMetadata } = await import('../page')
+
+describe('generateMetadata', () => {
+  const mockVideo = {
+    id: 1,
+    youtubeId: 'abc123',
+    sourceType: 'youtube',
+    title: 'Understanding React Server Components',
+    channel: 'Fireship',
+    thumbnail: 'https://i.ytimg.com/vi/abc123/hqdefault.jpg',
+    duration: 600,
+    description: 'A deep dive into React Server Components and how they change the way we build apps.',
+    transcript: 'Hello everyone...',
+    createdAt: new Date('2026-01-15'),
+    updatedAt: new Date('2026-01-15'),
+    publishedAt: new Date('2026-01-14'),
+  }
+
+  it('returns video title and description for a valid video', async () => {
+    mockLimit.mockResolvedValue([mockVideo])
+
+    const metadata = await generateMetadata({
+      params: Promise.resolve({ id: '1' }),
+    })
+
+    expect(metadata.title).toBe('Understanding React Server Components | Sluice')
+    expect(metadata.description).toContain('Fireship')
+    expect(metadata.description).toContain('A deep dive into React Server Components')
+  })
+
+  it('includes YouTube thumbnail as OG image when available', async () => {
+    mockLimit.mockResolvedValue([mockVideo])
+
+    const metadata = await generateMetadata({
+      params: Promise.resolve({ id: '1' }),
+    })
+
+    expect(metadata.openGraph?.images).toEqual([
+      {
+        url: 'https://i.ytimg.com/vi/abc123/hqdefault.jpg',
+        width: 480,
+        height: 360,
+        alt: 'Understanding React Server Components',
+      },
+    ])
+  })
+
+  it('uses summary_large_image twitter card when thumbnail exists', async () => {
+    mockLimit.mockResolvedValue([mockVideo])
+
+    const metadata = await generateMetadata({
+      params: Promise.resolve({ id: '1' }),
+    })
+
+    expect(metadata.twitter?.card).toBe('summary_large_image')
+  })
+
+  it('omits OG image for videos without thumbnails (transcript entries)', async () => {
+    mockLimit.mockResolvedValue([{
+      ...mockVideo,
+      thumbnail: null,
+      sourceType: 'transcript',
+      channel: null,
+    }])
+
+    const metadata = await generateMetadata({
+      params: Promise.resolve({ id: '1' }),
+    })
+
+    expect(metadata.openGraph?.images).toBeUndefined()
+    expect(metadata.twitter?.card).toBe('summary')
+  })
+
+  it('returns fallback title for missing video', async () => {
+    mockLimit.mockResolvedValue([])
+
+    const metadata = await generateMetadata({
+      params: Promise.resolve({ id: '999' }),
+    })
+
+    expect(metadata.title).toBe('Video Not Found | Sluice')
+  })
+
+  it('returns fallback title for invalid (non-numeric) video ID', async () => {
+    const metadata = await generateMetadata({
+      params: Promise.resolve({ id: 'not-a-number' }),
+    })
+
+    expect(metadata.title).toBe('Video Not Found | Sluice')
+    // Should not even attempt DB query for non-numeric ID
+    expect(mockFrom).not.toHaveBeenCalled()
+  })
+
+  it('uses "Watch on Sluice" fallback when video has no description', async () => {
+    mockLimit.mockResolvedValue([{
+      ...mockVideo,
+      description: null,
+    }])
+
+    const metadata = await generateMetadata({
+      params: Promise.resolve({ id: '1' }),
+    })
+
+    expect(metadata.description).toContain('Watch on Sluice')
+  })
+
+  it('truncates long descriptions to 150 characters', async () => {
+    const longDescription = 'A'.repeat(200)
+    mockLimit.mockResolvedValue([{
+      ...mockVideo,
+      description: longDescription,
+    }])
+
+    const metadata = await generateMetadata({
+      params: Promise.resolve({ id: '1' }),
+    })
+
+    // Description is "Fireship — " + first 150 chars
+    expect(metadata.description!.length).toBeLessThanOrEqual(162) // "Fireship — " (11) + 150 + " — " (4) = 161... let's be safe
+  })
+})
