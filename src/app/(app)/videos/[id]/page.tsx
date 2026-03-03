@@ -1,160 +1,80 @@
-'use client'
-
-import { use, useEffect, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import { VideoPlayer } from '@/components/videos/VideoPlayer'
-import { VideoMetadata } from '@/components/videos/VideoMetadata'
-import { InsightsTabs } from '@/components/insights/InsightsTabs'
-import { EmbedButton } from '@/components/video/EmbedButton'
-import { FocusAreaAssignment } from '@/components/video/FocusAreaAssignment'
-import { usePageTitle } from '@/components/layout/PageTitleContext'
-import { Button } from '@/components/ui/button'
-import { parseReturnTo } from '@/lib/navigation'
-import type { Video } from '@/lib/db/schema'
+import { notFound } from 'next/navigation'
+import type { Metadata } from 'next'
+import { db, videos } from '@/lib/db'
+import { eq } from 'drizzle-orm'
+import { VideoDetailClient } from './VideoDetailClient'
 
 interface VideoDetailPageProps {
-  params: Promise<{
-    id: string;
-  }>;
+  params: Promise<{ id: string }>
 }
 
-export default function VideoDetailPage({ params }: VideoDetailPageProps) {
-  const { id } = use(params)
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const [video, setVideo] = useState<Video | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [seekTime, setSeekTime] = useState<number | undefined>(undefined)
+async function getVideo(id: string) {
+  if (!/^\d+$/.test(id)) return null
+  const videoId = Number(id)
 
-  // Parse returnTo parameter
-  const returnTo = parseReturnTo(searchParams.get('returnTo'))
+  const result = await db
+    .select()
+    .from(videos)
+    .where(eq(videos.id, videoId))
+    .limit(1)
 
-  // Set page title
-  const { setPageTitle } = usePageTitle()
+  return result[0] ?? null
+}
 
-  // Fetch video data
-  useEffect(() => {
-    async function fetchVideo() {
-      try {
-        setIsLoading(true);
-        setError(null);
+export async function generateMetadata({ params }: VideoDetailPageProps): Promise<Metadata> {
+  const { id } = await params
+  const video = await getVideo(id)
 
-        const response = await fetch(`/api/videos/${id}`);
-
-        if (response.status === 404) {
-          setError('Video not found');
-          return;
-        }
-
-        if (!response.ok) {
-          throw new Error('Failed to fetch video');
-        }
-
-        const data = await response.json();
-
-        // Map dates from strings to Date objects
-        const mappedVideo: Video = {
-          ...data.video,
-          createdAt: new Date(data.video.createdAt),
-          updatedAt: new Date(data.video.updatedAt),
-        };
-
-        setVideo(mappedVideo);
-      } catch (err) {
-        console.error('Error fetching video:', err);
-        setError('Failed to load video. Please try again.');
-      } finally {
-        setIsLoading(false);
-      }
+  if (!video) {
+    return {
+      title: 'Video Not Found | Sluice',
     }
-
-    fetchVideo();
-  }, [id]);
-
-  // Set page title when video loads or on error
-  useEffect(() => {
-    const backHref = returnTo || '/'
-    const backLabel = returnTo?.startsWith('/discovery') ? 'Discovery' : 'Knowledge Bank'
-
-    if (video) {
-      setPageTitle({
-        title: video.title,
-        backHref,
-        backLabel,
-      })
-    } else if (error) {
-      setPageTitle({
-        title: 'Video Not Found',
-        backHref,
-        backLabel,
-      })
-    }
-  }, [video, error, setPageTitle, returnTo])
-
-  // Handle seek from transcript
-  const handleSeek = (seconds: number) => {
-    setSeekTime(seconds);
-  };
-
-  // Loading state
-  if (isLoading) {
-    return (
-      <div className="p-4 sm:p-6">
-        <div className="mb-6 h-6 w-full max-w-96 animate-pulse rounded bg-muted" />
-        <div className="mx-auto mb-8 aspect-video w-full max-w-[800px] animate-pulse rounded-lg bg-muted" />
-        <div className="h-[400px] w-full animate-pulse rounded-lg bg-muted" />
-      </div>
-    );
   }
 
-  // Error state (404 or other errors)
-  if (error || !video) {
-    const backHref = returnTo || '/'
-    const backLabel = returnTo?.startsWith('/discovery') ? 'Discovery' : 'Knowledge Bank'
+  const description = video.channel
+    ? `${video.channel} — ${video.description?.slice(0, 150) || 'Watch on Sluice'}`
+    : video.description?.slice(0, 150) || 'Watch on Sluice'
 
-    return (
-      <div className="p-4 sm:p-6">
-        <div className="mx-auto max-w-2xl rounded-lg border border-destructive/50 bg-destructive/10 p-8 text-center">
-          <h2 className="mb-2 text-xl font-semibold text-destructive">
-            {error || 'Video not found'}
-          </h2>
-          <p className="mb-4 text-sm text-muted-foreground">
-            The video you&apos;re looking for doesn&apos;t exist or has been removed.
-          </p>
-          <Button onClick={() => router.push(backHref)} variant="outline">
-            Return to {backLabel}
-          </Button>
-        </div>
-      </div>
-    )
+  const metadata: Metadata = {
+    title: `${video.title} | Sluice`,
+    description,
+    openGraph: {
+      title: video.title,
+      description,
+      type: 'article',
+      ...(video.thumbnail
+        ? {
+            images: [
+              {
+                url: video.thumbnail,
+                width: 480,
+                height: 360,
+                alt: video.title,
+              },
+            ],
+          }
+        : {}),
+    },
+    twitter: {
+      card: video.thumbnail ? 'summary_large_image' : 'summary',
+      title: video.title,
+      description,
+      ...(video.thumbnail
+        ? { images: [video.thumbnail] }
+        : {}),
+    },
   }
 
-  return (
-    <div className="p-4 sm:p-6">
-      {/* Metadata row */}
-      <VideoMetadata video={video} className="mb-6" />
+  return metadata
+}
 
-      {/* Focus area assignment */}
-      <FocusAreaAssignment videoId={video.id} />
+export default async function VideoDetailPage({ params }: VideoDetailPageProps) {
+  const { id } = await params
+  const video = await getVideo(id)
 
-      {/* Video player - only for YouTube videos */}
-      {video.sourceType === 'youtube' && video.youtubeId && (
-        <VideoPlayer
-          youtubeId={video.youtubeId}
-          seekTime={seekTime}
-          className="mb-8"
-        />
-      )}
+  if (!video) {
+    notFound()
+  }
 
-      {/* Embedding status and generation */}
-      <EmbedButton
-        videoId={video.id}
-        hasTranscript={!!video.transcript}
-      />
-
-      {/* Tabs with Transcript and Insights */}
-      <InsightsTabs video={video} onSeek={handleSeek} className="mt-8" />
-    </div>
-  );
+  return <VideoDetailClient video={video} />
 }
