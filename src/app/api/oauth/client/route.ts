@@ -6,7 +6,7 @@ import { startApiTimer } from '@/lib/api-timing'
 import { requireSession } from '@/lib/auth-guards'
 
 const querySchema = z.object({
-  client_id: z.string().min(1, 'Missing required query parameter: client_id'),
+  client_id: z.string().trim().min(1, 'Missing required query parameter: client_id'),
 })
 
 export async function GET(request: Request) {
