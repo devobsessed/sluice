@@ -47,7 +47,7 @@ export const auth = betterAuth({
     jwt(),
     oauthProvider({
       loginPage: '/sign-in',
-      consentPage: '/sign-in',
+      consentPage: '/consent',
       allowDynamicClientRegistration: true,
       allowUnauthenticatedClientRegistration: true,
       validAudiences: [process.env.BETTER_AUTH_URL || ''],
