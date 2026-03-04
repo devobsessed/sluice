@@ -50,7 +50,10 @@ export const auth = betterAuth({
       consentPage: '/consent',
       allowDynamicClientRegistration: true,
       allowUnauthenticatedClientRegistration: true,
-      validAudiences: [process.env.BETTER_AUTH_URL || ''],
+      validAudiences: [
+        process.env.BETTER_AUTH_URL || '',
+        `${process.env.BETTER_AUTH_URL || ''}/`,
+      ],
     }),
   ],
 })

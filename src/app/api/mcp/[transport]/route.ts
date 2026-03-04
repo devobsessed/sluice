@@ -75,7 +75,7 @@ async function wrappedHandler(request: Request): Promise<Response> {
       await verifyAccessToken(accessToken, {
         verifyOptions: {
           issuer: `${authUrl}/api/auth`,
-          audience: authUrl,
+          audience: [authUrl, `${authUrl}/`],
         },
         jwksUrl: `${authUrl}/api/auth/jwks`,
       })

@@ -128,7 +128,7 @@ describe('handleInsightRequest', () => {
   it('calls send with cancelled event when aborted during streaming', async () => {
     // Create a stream that emits one delta, then waits
     const listeners = new Map<string, ((...args: unknown[]) => void)[]>()
-    let resolveFinalize: ((val: unknown) => void) | null = null
+    const pending: { resolve: ((val: unknown) => void) | null } = { resolve: null }
 
     const mockStream = {
       on(event: string, cb: (...args: unknown[]) => void) {
@@ -141,7 +141,7 @@ describe('handleInsightRequest', () => {
         for (const cb of listeners.get('text') ?? []) {
           cb('Start ')
         }
-        resolveFinalize = resolve
+        pending.resolve = resolve
       })),
     }
 
@@ -155,9 +155,7 @@ describe('handleInsightRequest', () => {
     cancelInsight(testRequest.id)
 
     // Resolve the stream so handleInsightRequest can finish
-    if (resolveFinalize) {
-      resolveFinalize({ content: [{ type: 'text', text: 'Start ' }] })
-    }
+    pending.resolve?.({ content: [{ type: 'text', text: 'Start ' }] })
 
     await promise
 
@@ -219,7 +217,7 @@ describe('cancelInsight', () => {
   })
 
   it('returns true and aborts when request exists', async () => {
-    let resolveFinalize: ((val: unknown) => void) | null = null
+    const pending: { resolve: ((val: unknown) => void) | null } = { resolve: null }
     const listeners = new Map<string, ((...args: unknown[]) => void)[]>()
 
     const mockStream = {
@@ -232,7 +230,7 @@ describe('cancelInsight', () => {
         for (const cb of listeners.get('text') ?? []) {
           cb('Start')
         }
-        resolveFinalize = resolve
+        pending.resolve = resolve
       })),
     }
 
@@ -249,9 +247,7 @@ describe('cancelInsight', () => {
     expect(cancelled).toBe(true)
 
     // Resolve so handler can finish
-    if (resolveFinalize) {
-      resolveFinalize({ content: [{ type: 'text', text: 'Start' }] })
-    }
+    pending.resolve?.({ content: [{ type: 'text', text: 'Start' }] })
 
     await promise
   })

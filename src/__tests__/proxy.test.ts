@@ -63,6 +63,13 @@ describe('proxy', () => {
         expect(mockGetSessionCookie).not.toHaveBeenCalled()
       })
 
+      it('allows /consent without auth', () => {
+        const response = proxy(createRequest('/consent'))
+        expect(response.status).toBe(200)
+        expect(response.headers.get('x-middleware-next')).toBe('1')
+        expect(mockGetSessionCookie).not.toHaveBeenCalled()
+      })
+
       it('allows /api/auth/* without auth', () => {
         const response = proxy(createRequest('/api/auth/callback/google'))
         expect(response.status).toBe(200)
