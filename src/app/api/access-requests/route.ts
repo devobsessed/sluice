@@ -2,7 +2,10 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { accessRequests } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { eq, desc } from 'drizzle-orm'
+import { auth } from '@/lib/auth'
+import { headers } from 'next/headers'
+import { isAdmin } from '@/lib/admin'
 
 const accessRequestSchema = z.object({
   name: z.preprocess(
@@ -15,6 +18,40 @@ const accessRequestSchema = z.object({
   ),
   message: z.string().trim().optional(),
 })
+
+export async function GET(request: Request) {
+  if (process.env.NODE_ENV !== 'development') {
+    const session = await auth.api.getSession({ headers: await headers() })
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    if (!isAdmin(session.user.email)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+  }
+
+  const url = new URL(request.url)
+  const status = url.searchParams.get('status')
+
+  try {
+    const query = db
+      .select()
+      .from(accessRequests)
+      .orderBy(desc(accessRequests.createdAt))
+
+    const rows = status
+      ? await query.where(eq(accessRequests.status, status))
+      : await query
+
+    return NextResponse.json({ data: rows })
+  } catch (error) {
+    console.error('Failed to fetch access requests:', error)
+    return NextResponse.json(
+      { error: 'Failed to fetch access requests' },
+      { status: 500 },
+    )
+  }
+}
 
 export async function POST(request: Request) {
   try {
