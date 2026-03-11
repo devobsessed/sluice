@@ -338,6 +338,20 @@ export const oauthConsent = pgTable('oauth_consent', {
   userIdx: index('oauth_consent_user_idx').on(table.userId),
 }))
 
+/**
+ * Access Requests table - external users request access to Sluice
+ * Status transitions: pending -> approved OR pending -> denied (final)
+ */
+export const accessRequests = pgTable('access_requests', {
+  id: serial('id').primaryKey(),
+  email: text('email').notNull().unique(),
+  name: text('name').notNull(),
+  message: text('message'),
+  status: text('status').notNull().default('pending'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
 // Type exports for use in application code
 export type Video = typeof videos.$inferSelect;
 export type NewVideo = typeof videos.$inferInsert;
@@ -398,3 +412,6 @@ export type NewOAuthRefreshToken = typeof oauthRefreshToken.$inferInsert;
 
 export type OAuthConsent = typeof oauthConsent.$inferSelect;
 export type NewOAuthConsent = typeof oauthConsent.$inferInsert;
+
+export type AccessRequest = typeof accessRequests.$inferSelect;
+export type NewAccessRequest = typeof accessRequests.$inferInsert;
