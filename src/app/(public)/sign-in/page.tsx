@@ -48,7 +48,7 @@ function SignInContent() {
       if (result.error) {
         const status = result.error.status
         if (status === 403) {
-          setError(result.error.message ?? 'Access restricted. Check with your administrator.')
+          setError('__403__')
         } else {
           setError(result.error.message ?? 'Sign in failed')
         }
@@ -127,7 +127,16 @@ function SignInContent() {
         <CardContent className="pt-6 space-y-4">
           {error && (
             <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-center text-sm text-destructive">
-              {error}
+              {error === '__403__' ? (
+                <>
+                  Access restricted.{' '}
+                  <Link href="/request-access" className="underline font-medium hover:text-destructive/80">
+                    Request access
+                  </Link>
+                </>
+              ) : (
+                error
+              )}
             </div>
           )}
           <Button
