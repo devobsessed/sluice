@@ -1,9 +1,10 @@
-import type { Metadata } from "next";
-import { ThemeToggle } from "@/components/settings/ThemeToggle";
+import type { Metadata } from 'next'
+import { ThemeToggle } from '@/components/settings/ThemeToggle'
+import { AdminSettingsLink } from '@/components/admin/AdminSettingsLink'
 
 export const metadata: Metadata = {
-  title: "Settings | Sluice",
-};
+  title: 'Settings | Sluice',
+}
 
 export default function Settings() {
   return (
@@ -18,7 +19,9 @@ export default function Settings() {
           <h2 className="text-lg font-semibold mb-4">Appearance</h2>
           <ThemeToggle />
         </section>
+
+        <AdminSettingsLink />
       </div>
     </div>
-  );
+  )
 }

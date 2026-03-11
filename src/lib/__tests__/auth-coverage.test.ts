@@ -88,6 +88,6 @@ describe('API route auth coverage', () => {
 
     // Update this number when adding new routes — forces developer to
     // consciously decide on auth for the new route
-    expect(routeFiles.length).toBe(36)
+    expect(routeFiles.length).toBe(38)
   })
 })
