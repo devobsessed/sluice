@@ -1,3 +1,6 @@
+
+<img width="1672" height="838" alt="Screenshot 2026-03-11 at 3 35 45 PM" src="https://github.com/user-attachments/assets/6195cbc3-1dd5-4875-ae59-0f7d271ff981" />
+
 <div align="center">
 
 # Sluice
