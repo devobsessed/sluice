@@ -8,7 +8,7 @@ import { db } from '@/lib/db'
 import { accessRequests } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
 
-const ALLOWED_EMAIL_DOMAIN = process.env.ALLOWED_EMAIL_DOMAIN ?? 'devobsessed.com'
+const ALLOWED_EMAIL_DOMAIN = (process.env.ALLOWED_EMAIL_DOMAIN ?? 'devobsessed.com').toLowerCase()
 
 export const auth = betterAuth({
   disabledPaths: ['/token'],

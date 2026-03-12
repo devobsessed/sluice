@@ -3,7 +3,7 @@ import { auth } from '@/lib/auth'
 import { headers } from 'next/headers'
 import { db } from '@/lib/db'
 import { accessRequests } from '@/lib/db/schema'
-import { eq, and } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { isAdmin } from '@/lib/admin'
 import { z } from 'zod'
 
@@ -26,10 +26,12 @@ export async function PATCH(
   }
 
   const { id: idStr } = await params
-  if (!/^[1-9]\d*$/.test(idStr)) {
+  const IdSchema = z.coerce.number().int().min(1).max(2147483647)
+  const idParsed = IdSchema.safeParse(idStr)
+  if (!idParsed.success) {
     return NextResponse.json({ error: 'Invalid request ID' }, { status: 400 })
   }
-  const id = Number(idStr)
+  const id = idParsed.data
 
   let body: unknown
   try {
@@ -47,26 +49,31 @@ export async function PATCH(
   }
 
   try {
+    const [existing] = await db
+      .select({ id: accessRequests.id, status: accessRequests.status })
+      .from(accessRequests)
+      .where(eq(accessRequests.id, id))
+      .limit(1)
+
+    if (!existing) {
+      return NextResponse.json({ error: 'Request not found' }, { status: 404 })
+    }
+
+    if (existing.status !== 'pending') {
+      return NextResponse.json(
+        { error: 'Request is not in pending status' },
+        { status: 400 },
+      )
+    }
+
     const [updated] = await db
       .update(accessRequests)
       .set({
         status: parsed.data.status,
         updatedAt: new Date(),
       })
-      .where(
-        and(
-          eq(accessRequests.id, id),
-          eq(accessRequests.status, 'pending'),
-        ),
-      )
+      .where(eq(accessRequests.id, id))
       .returning()
-
-    if (!updated) {
-      return NextResponse.json(
-        { error: 'Request not found or not in pending status' },
-        { status: 400 },
-      )
-    }
 
     return NextResponse.json({ data: updated })
   } catch (error) {

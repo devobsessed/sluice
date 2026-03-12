@@ -93,6 +93,10 @@ export function AccessRequestsPanel() {
             return next
           })
         }, 200)
+      } else {
+        const json = await res.json().catch(() => ({ error: 'Unknown error' })) as { error?: string }
+        console.error('Failed to update access request:', json.error)
+        await fetchRequests()
       }
     } catch (err) {
       console.error('Failed to update access request:', err)
