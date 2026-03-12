@@ -10,7 +10,9 @@ export function AdminSettingsLink() {
   const [isAdmin, setIsAdmin] = useState(false)
 
   useEffect(() => {
-    if (!session?.user?.email) return
+    // In dev mode, session may be null (no auth) but /api/admin/check returns true
+    // In production, wait for session to load before checking
+    if (process.env.NODE_ENV !== 'development' && !session?.user?.email) return
 
     fetch('/api/admin/check')
       .then((res) => res.json())

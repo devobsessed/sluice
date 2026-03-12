@@ -181,3 +181,17 @@ describe('POST /api/access-requests', () => {
     )
   })
 })
+
+describe('GET /api/access-requests', () => {
+  it('route module exports GET function', async () => {
+    const routeModule = await import('@/app/api/access-requests/route')
+    expect(typeof routeModule.GET).toBe('function')
+  })
+})
+
+describe('PATCH /api/access-requests/[id]', () => {
+  it('route module exports PATCH function', async () => {
+    const routeModule = await import('@/app/api/access-requests/[id]/route')
+    expect(typeof routeModule.PATCH).toBe('function')
+  })
+})
