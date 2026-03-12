@@ -13,7 +13,6 @@ describe('API route auth coverage', () => {
   // Routes that are intentionally unauthenticated — skip auth check
   const AUTH_HANDLER_ROUTES = [
     'src/app/api/auth/[...all]/route.ts',       // Better Auth catch-all IS the auth system
-    'src/app/api/access-requests/route.ts',      // Public endpoint for unauthenticated access requests
   ]
 
   // Auth patterns to look for in route file source code

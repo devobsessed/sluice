@@ -52,6 +52,8 @@ export function AccessRequestsPanel() {
       if (res.ok) {
         const json = await res.json() as { data: AccessRequest[] }
         setRequests(json.data)
+      } else {
+        console.error('Failed to fetch access requests:', res.status)
       }
     } catch (err) {
       console.error('Failed to fetch access requests:', err)

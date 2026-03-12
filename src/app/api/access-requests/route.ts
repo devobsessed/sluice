@@ -10,7 +10,7 @@ import { isAdmin } from '@/lib/admin'
 const accessRequestSchema = z.object({
   name: z.preprocess(
     (v) => (typeof v === 'string' ? v : ''),
-    z.string().min(1, 'Name is required').trim(),
+    z.string().trim().min(1, 'Name is required'),
   ),
   email: z.preprocess(
     (v) => (typeof v === 'string' ? v.trim().toLowerCase() : ''),
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
     const query = db
       .select()
       .from(accessRequests)
-      .orderBy(desc(accessRequests.createdAt))
+      .orderBy(desc(accessRequests.updatedAt))
 
     const rows = status
       ? await query.where(eq(accessRequests.status, status))
@@ -55,7 +55,12 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json()
+    let body: unknown
+    try {
+      body = await request.json()
+    } catch {
+      return NextResponse.json({ error: 'Malformed JSON' }, { status: 400 })
+    }
 
     const parsed = accessRequestSchema.safeParse(body)
     if (!parsed.success) {

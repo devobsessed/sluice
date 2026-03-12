@@ -33,7 +33,7 @@ export const auth = betterAuth({
     user: {
       create: {
         before: async (user) => {
-          const email = user.email
+          const email = user.email.trim().toLowerCase()
 
           // Check 1: domain match (existing behavior)
           if (email.endsWith(`@${ALLOWED_EMAIL_DOMAIN}`)) {

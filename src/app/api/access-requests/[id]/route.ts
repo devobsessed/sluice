@@ -26,12 +26,18 @@ export async function PATCH(
   }
 
   const { id: idStr } = await params
-  const id = parseInt(idStr, 10)
-  if (isNaN(id)) {
+  if (!/^[1-9]\d*$/.test(idStr)) {
     return NextResponse.json({ error: 'Invalid request ID' }, { status: 400 })
   }
+  const id = Number(idStr)
 
-  const body = await request.json()
+  let body: unknown
+  try {
+    body = await request.json()
+  } catch {
+    return NextResponse.json({ error: 'Malformed JSON' }, { status: 400 })
+  }
+
   const parsed = PatchSchema.safeParse(body)
   if (!parsed.success) {
     return NextResponse.json(
