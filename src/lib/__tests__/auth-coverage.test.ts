@@ -10,9 +10,9 @@ import { resolve } from 'path'
  * serving as a guardrail for future development.
  */
 describe('API route auth coverage', () => {
-  // The Better Auth catch-all IS the auth system — skip it
+  // Routes that are intentionally unauthenticated — skip auth check
   const AUTH_HANDLER_ROUTES = [
-    'src/app/api/auth/[...all]/route.ts',
+    'src/app/api/auth/[...all]/route.ts',       // Better Auth catch-all IS the auth system
   ]
 
   // Auth patterns to look for in route file source code
@@ -87,6 +87,6 @@ describe('API route auth coverage', () => {
 
     // Update this number when adding new routes — forces developer to
     // consciously decide on auth for the new route
-    expect(routeFiles.length).toBe(35)
+    expect(routeFiles.length).toBe(38)
   })
 })

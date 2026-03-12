@@ -89,7 +89,7 @@ describe('SignInPage', () => {
       })
     })
 
-    it('shows domain restriction error on 403 status', async () => {
+    it('shows access restricted message with request access link on 403', async () => {
       mockSignIn.social.mockResolvedValue({
         error: { status: 403, message: 'Only @devobsessed.com accounts are allowed' },
       })
@@ -97,11 +97,13 @@ describe('SignInPage', () => {
       render(<SignInPage />)
       await user.click(screen.getByRole('button', { name: /sign in with google/i }))
       await waitFor(() => {
-        expect(screen.getByText('Only @devobsessed.com accounts are allowed')).toBeInTheDocument()
+        expect(screen.getByText(/access restricted/i)).toBeInTheDocument()
       })
+      const requestLink = screen.getByRole('link', { name: /request access/i })
+      expect(requestLink).toHaveAttribute('href', '/request-access')
     })
 
-    it('shows fallback error on 403 without message', async () => {
+    it('shows access restricted with request access link on 403 without message', async () => {
       mockSignIn.social.mockResolvedValue({
         error: { status: 403 },
       })
@@ -109,8 +111,9 @@ describe('SignInPage', () => {
       render(<SignInPage />)
       await user.click(screen.getByRole('button', { name: /sign in with google/i }))
       await waitFor(() => {
-        expect(screen.getByText('Access restricted. Check with your administrator.')).toBeInTheDocument()
+        expect(screen.getByText(/access restricted/i)).toBeInTheDocument()
       })
+      expect(screen.getByRole('link', { name: /request access/i })).toBeInTheDocument()
     })
 
     it('shows generic error for non-403 errors', async () => {
@@ -123,6 +126,19 @@ describe('SignInPage', () => {
       await waitFor(() => {
         expect(screen.getByText('Internal server error')).toBeInTheDocument()
       })
+    })
+
+    it('does not show request access link for non-403 errors', async () => {
+      mockSignIn.social.mockResolvedValue({
+        error: { status: 500, message: 'Internal server error' },
+      })
+      const user = userEvent.setup()
+      render(<SignInPage />)
+      await user.click(screen.getByRole('button', { name: /sign in with google/i }))
+      await waitFor(() => {
+        expect(screen.getByText('Internal server error')).toBeInTheDocument()
+      })
+      expect(screen.queryByRole('link', { name: /request access/i })).not.toBeInTheDocument()
     })
 
     it('shows fallback error on exception', async () => {

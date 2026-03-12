@@ -5,8 +5,10 @@ import { jwt } from 'better-auth/plugins'
 import { oauthProvider } from '@better-auth/oauth-provider'
 import { APIError } from 'better-auth/api'
 import { db } from '@/lib/db'
+import { accessRequests } from '@/lib/db/schema'
+import { eq, and } from 'drizzle-orm'
 
-const ALLOWED_EMAIL_DOMAIN = process.env.ALLOWED_EMAIL_DOMAIN ?? 'devobsessed.com'
+const ALLOWED_EMAIL_DOMAIN = (process.env.ALLOWED_EMAIL_DOMAIN ?? 'devobsessed.com').toLowerCase()
 
 export const auth = betterAuth({
   disabledPaths: ['/token'],
@@ -31,13 +33,32 @@ export const auth = betterAuth({
     user: {
       create: {
         before: async (user) => {
-          const email = user.email
-          if (!email.endsWith(`@${ALLOWED_EMAIL_DOMAIN}`)) {
-            throw new APIError('FORBIDDEN', {
-              message: `Only @${ALLOWED_EMAIL_DOMAIN} accounts are allowed`,
-            })
+          const email = user.email.trim().toLowerCase()
+
+          // Check 1: domain match (existing behavior)
+          if (email.endsWith(`@${ALLOWED_EMAIL_DOMAIN}`)) {
+            return { data: user }
           }
-          return { data: user }
+
+          // Check 2: approved access request
+          const [approved] = await db
+            .select({ id: accessRequests.id })
+            .from(accessRequests)
+            .where(
+              and(
+                eq(accessRequests.email, email),
+                eq(accessRequests.status, 'approved'),
+              )
+            )
+            .limit(1)
+
+          if (approved) {
+            return { data: user }
+          }
+
+          throw new APIError('FORBIDDEN', {
+            message: `Only @${ALLOWED_EMAIL_DOMAIN} accounts are allowed`,
+          })
         },
       },
     },
