@@ -6,8 +6,13 @@ import { parseTranscript } from '@/lib/transcript/parse'
 import { chunkTranscript } from '@/lib/embeddings/chunker'
 // Dynamic import used at call site to avoid ONNX native library crash on module load
 import { enqueueJob } from './queue'
+import { generateText } from '@/lib/claude/client'
+import { buildExtractionPrompt } from '@/lib/claude/prompts/extract'
+import { parsePartialJSON } from '@/lib/claude/prompts/parser'
+import { getExtractionForVideo, upsertExtraction } from '@/lib/db/insights'
 import type { Job } from '@/lib/db/schema'
 import type { TranscriptSegment } from '@/lib/embeddings/types'
+import type { ExtractionResult } from '@/lib/claude/prompts/types'
 
 export interface TranscriptJobPayload {
   videoId: number
@@ -110,4 +115,74 @@ export async function processGenerateEmbeddings(payload: unknown): Promise<void>
   // Dynamic import to avoid ONNX native library crash on module load
   const { embedChunks } = await import('@/lib/embeddings/service')
   await embedChunks(chunkedSegments, undefined, videoId)
+}
+
+export async function processGenerateInsights(payload: unknown): Promise<void> {
+  // Validate payload
+  const data = payload as Record<string, unknown>
+  const videoId = data.videoId
+
+  if (typeof videoId !== 'number') {
+    throw new Error('Invalid insights job payload')
+  }
+
+  // Idempotency: skip if insights already exist
+  const existing = await getExtractionForVideo(videoId)
+  if (existing) {
+    console.log(`[insights-job] Video ${videoId} already has insights, skipping`)
+    return
+  }
+
+  // Get the video to build the extraction prompt
+  const result = await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
+  const video = result[0]
+
+  if (!video) {
+    throw new Error(`Video ${videoId} not found`)
+  }
+
+  if (!video.transcript) {
+    throw new Error(`Video ${videoId} has no transcript`)
+  }
+
+  // Build prompt and call Claude API (non-streaming)
+  const prompt = buildExtractionPrompt({
+    title: video.title,
+    channel: video.channel ?? '',
+    transcript: video.transcript,
+  })
+
+  const rawResponse = await generateText(prompt)
+
+  if (!rawResponse || rawResponse.trim() === '') {
+    throw new Error(`Claude returned empty response for video ${videoId}`)
+  }
+
+  // Parse the JSON response
+  const parsed = parsePartialJSON(rawResponse)
+
+  if (!parsed) {
+    throw new Error(`Failed to parse extraction response for video ${videoId}`)
+  }
+
+  // Validate minimum required sections before persisting
+  if (!parsed.contentType || !parsed.summary || !parsed.insights || !parsed.actionItems) {
+    throw new Error(`Incomplete extraction for video ${videoId}: missing required sections`)
+  }
+
+  // Fill in claudeCode default if missing (same logic as ExtractionProvider's isCompleteExtraction)
+  if (!parsed.claudeCode) {
+    parsed.claudeCode = {
+      applicable: false,
+      skills: [],
+      commands: [],
+      agents: [],
+      hooks: [],
+      rules: [],
+    }
+  }
+
+  // Persist to database
+  await upsertExtraction(videoId, parsed as ExtractionResult)
+  console.log(`[insights-job] Generated insights for video ${videoId} (type: ${parsed.contentType})`)
 }
