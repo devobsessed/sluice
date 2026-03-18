@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest'
+import { sql } from 'drizzle-orm'
 import { Pool } from 'pg'
 import { drizzle } from 'drizzle-orm/node-postgres'
 import * as schema from '@/lib/db/schema'
@@ -40,7 +41,7 @@ describe('PATCH /api/focus-areas/[id]', () => {
   })
 
   beforeEach(async () => {
-    await pool.query('TRUNCATE focus_areas CASCADE')
+    await testDb.execute(sql`TRUNCATE focus_areas CASCADE`)
   })
 
   afterAll(async () => {
@@ -51,19 +52,19 @@ describe('PATCH /api/focus-areas/[id]', () => {
     // Create focus area
     const [focusArea] = await testDb
       .insert(schema.focusAreas)
-      .values({ name: 'React' })
+      .values({ name: 'Angular' })
       .returning()
 
     const request = new Request(`http://localhost:3000/api/focus-areas/${focusArea!.id}`, {
       method: 'PATCH',
-      body: JSON.stringify({ name: 'React.js' }),
+      body: JSON.stringify({ name: 'Angular.js' }),
     })
 
     const response = await PATCH(request, { params: Promise.resolve({ id: String(focusArea!.id) }) })
     const data = await response.json()
 
     expect(response.status).toBe(200)
-    expect(data.focusArea.name).toBe('React.js')
+    expect(data.focusArea.name).toBe('Angular.js')
     expect(data.focusArea.id).toBe(focusArea!.id)
   })
 
@@ -71,7 +72,7 @@ describe('PATCH /api/focus-areas/[id]', () => {
 
     const [focusArea] = await testDb
       .insert(schema.focusAreas)
-      .values({ name: 'React', color: '#000000' })
+      .values({ name: 'Angular', color: '#000000' })
       .returning()
 
     const request = new Request(`http://localhost:3000/api/focus-areas/${focusArea!.id}`, {
@@ -84,14 +85,14 @@ describe('PATCH /api/focus-areas/[id]', () => {
 
     expect(response.status).toBe(200)
     expect(data.focusArea.color).toBe('#61dafb')
-    expect(data.focusArea.name).toBe('React') // name unchanged
+    expect(data.focusArea.name).toBe('Angular') // name unchanged
   })
 
   it('returns 400 when name is empty string', async () => {
 
     const [focusArea] = await testDb
       .insert(schema.focusAreas)
-      .values({ name: 'React' })
+      .values({ name: 'Angular' })
       .returning()
 
     const request = new Request(`http://localhost:3000/api/focus-areas/${focusArea!.id}`, {
@@ -122,12 +123,12 @@ describe('PATCH /api/focus-areas/[id]', () => {
   it('returns 409 when new name conflicts with existing focus area', async () => {
 
     // Create two focus areas
-    const [first] = await testDb.insert(schema.focusAreas).values({ name: 'React' }).returning()
-    await testDb.insert(schema.focusAreas).values({ name: 'TypeScript' })
+    const [first] = await testDb.insert(schema.focusAreas).values({ name: 'Angular' }).returning()
+    await testDb.insert(schema.focusAreas).values({ name: 'Svelte' })
 
     const request = new Request(`http://localhost:3000/api/focus-areas/${first!.id}`, {
       method: 'PATCH',
-      body: JSON.stringify({ name: 'TypeScript' }),
+      body: JSON.stringify({ name: 'Svelte' }),
     })
 
     const response = await PATCH(request, { params: Promise.resolve({ id: String(first!.id) }) })
@@ -141,19 +142,19 @@ describe('PATCH /api/focus-areas/[id]', () => {
 
     const [focusArea] = await testDb
       .insert(schema.focusAreas)
-      .values({ name: 'React' })
+      .values({ name: 'Angular' })
       .returning()
 
     const request = new Request(`http://localhost:3000/api/focus-areas/${focusArea!.id}`, {
       method: 'PATCH',
-      body: JSON.stringify({ name: '  Vue.js  ' }),
+      body: JSON.stringify({ name: '  Ember.js  ' }),
     })
 
     const response = await PATCH(request, { params: Promise.resolve({ id: String(focusArea!.id) }) })
     const data = await response.json()
 
     expect(response.status).toBe(200)
-    expect(data.focusArea.name).toBe('Vue.js')
+    expect(data.focusArea.name).toBe('Ember.js')
   })
 })
 
@@ -164,7 +165,7 @@ describe('DELETE /api/focus-areas/[id]', () => {
   })
 
   beforeEach(async () => {
-    await pool.query('TRUNCATE videos, focus_areas CASCADE')
+    await testDb.execute(sql`TRUNCATE videos, focus_areas CASCADE`)
   })
 
   afterAll(async () => {
@@ -175,7 +176,7 @@ describe('DELETE /api/focus-areas/[id]', () => {
 
     const [focusArea] = await testDb
       .insert(schema.focusAreas)
-      .values({ name: 'React' })
+      .values({ name: 'Angular' })
       .returning()
 
     const request = new Request(`http://localhost:3000/api/focus-areas/${focusArea!.id}`, {
@@ -217,7 +218,7 @@ describe('DELETE /api/focus-areas/[id]', () => {
 
     const [focusArea] = await testDb
       .insert(schema.focusAreas)
-      .values({ name: 'React' })
+      .values({ name: 'Angular' })
       .returning()
 
     // Create junction entry

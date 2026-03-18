@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vites
 import { Pool } from 'pg'
 import { drizzle } from 'drizzle-orm/node-postgres'
 import * as schema from '@/lib/db/schema'
+import { sql } from 'drizzle-orm'
 
 vi.mock('@/lib/auth-guards', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/auth-guards')>()
@@ -40,7 +41,7 @@ describe('GET /api/focus-areas', () => {
   })
 
   beforeEach(async () => {
-    await pool.query('TRUNCATE focus_areas CASCADE')
+    await testDb.execute(sql`TRUNCATE focus_areas CASCADE`)
   })
 
   afterAll(async () => {
@@ -81,7 +82,7 @@ describe('POST /api/focus-areas', () => {
   })
 
   beforeEach(async () => {
-    await pool.query('TRUNCATE focus_areas CASCADE')
+    await testDb.execute(sql`TRUNCATE focus_areas CASCADE`)
   })
 
   afterAll(async () => {
