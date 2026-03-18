@@ -60,7 +60,7 @@ async function processFetchTranscript(payload: unknown): Promise<void> {
   await enqueueJob('generate_embeddings', { videoId })
 }
 
-async function processGenerateEmbeddings(payload: unknown): Promise<void> {
+export async function processGenerateEmbeddings(payload: unknown): Promise<void> {
   // Validate payload
   const data = payload as Record<string, unknown>
   const videoId = data.videoId
