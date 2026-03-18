@@ -36,13 +36,13 @@ const INNERTUBE_CLIENTS = [
     name: 'ANDROID',
     headers: {
       'Content-Type': 'application/json',
-      'User-Agent': 'com.google.android.youtube/19.09.37 (Linux; Android 13)',
+      'User-Agent': 'com.google.android.youtube/21.03.36(Linux; U; Android 16; en_US; SM-S908E Build/TP1A.220624.014) gzip',
     },
     context: {
       client: {
         clientName: 'ANDROID',
-        clientVersion: '19.09.37',
-        androidSdkVersion: 33,
+        clientVersion: '21.03.36',
+        androidSdkVersion: 36,
       },
     },
   },
@@ -50,13 +50,13 @@ const INNERTUBE_CLIENTS = [
     name: 'WEB',
     headers: {
       'Content-Type': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
       'Cookie': 'CONSENT=PENDING+987; SOCS=CAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg',
     },
     context: {
       client: {
         clientName: 'WEB',
-        clientVersion: '2.20240101.00.00',
+        clientVersion: '2.20260206.01.00',
       },
     },
   },
@@ -103,6 +103,12 @@ async function tryInnerTubeClient(
     }),
   })
 
+  if (!playerResponse.ok) {
+    throw new Error(
+      `InnerTube API rejected request (${client.name}: HTTP ${playerResponse.status})`
+    )
+  }
+
   const data = await playerResponse.json()
   const playabilityStatus = data?.playabilityStatus?.status
   const captions = data?.captions?.playerCaptionsTracklistRenderer
@@ -111,7 +117,7 @@ async function tryInnerTubeClient(
   console.info(`[transcript] ${client.name} response for ${videoId}: playability=${playabilityStatus}, tracks=${captions?.captionTracks?.length ?? 0}`)
 
   if (!captions?.captionTracks?.length) {
-    throw new Error(`Transcript is disabled on this video (${client.name}: ${playabilityStatus ?? 'no status'})`)
+    throw new Error(`No caption tracks available (${client.name}: playability=${playabilityStatus ?? 'unknown'})`)
   }
 
   const tracks = captions.captionTracks as Array<{
@@ -267,8 +273,10 @@ export async function fetchTranscript(
 
     let errorMessage = `Failed to fetch transcript: ${message}`
 
-    if (message.includes('disabled') || message.includes('Transcript is disabled')) {
-      errorMessage = 'Transcripts are disabled for this video'
+    if (message.includes('API rejected')) {
+      errorMessage = 'YouTube API rejected the request - InnerTube client versions may be outdated'
+    } else if (message.includes('No caption tracks') || message.includes('disabled')) {
+      errorMessage = 'Transcripts are not available for this video'
     } else if (message.includes('private') || message.includes('unavailable')) {
       errorMessage = 'Video is private or unavailable'
     } else if (message.includes('not found') || message.includes('No transcript')) {
