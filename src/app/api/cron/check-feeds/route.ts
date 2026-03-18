@@ -4,6 +4,8 @@ import { getChannelsForAutoFetch, updateChannelLastFetched } from '@/lib/automat
 import { findNewVideos, createVideoFromRSS } from '@/lib/automation/delta'
 import { enqueueJob } from '@/lib/automation/queue'
 import { verifyCronSecret } from '@/lib/auth-guards'
+import { start } from 'workflow/api'
+import { rssFeedWorkflow } from '@/workflows/rss-feed'
 
 export async function GET(request: Request) {
   // Verify cron secret (timing-safe, rejects when env unset)
@@ -23,7 +25,11 @@ export async function GET(request: Request) {
 
         for (const video of newVideos) {
           const videoId = await createVideoFromRSS(video)
-          await enqueueJob('fetch_transcript', { videoId, youtubeId: video.youtubeId })
+          if (process.env.VERCEL) {
+            await start(rssFeedWorkflow, [videoId, video.youtubeId])
+          } else {
+            await enqueueJob('fetch_transcript', { videoId, youtubeId: video.youtubeId })
+          }
           newVideosQueued++
         }
 
