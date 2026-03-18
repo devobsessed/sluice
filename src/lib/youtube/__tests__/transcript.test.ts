@@ -8,6 +8,8 @@ vi.stubGlobal('fetch', mockFetch)
 function mockInnerTubeSuccess(segments: Array<{ text: string; start: number; dur: number }>) {
   // First call: InnerTube player API → returns caption tracks
   mockFetch.mockResolvedValueOnce({
+    ok: true,
+    status: 200,
     json: async () => ({
       captions: {
         playerCaptionsTracklistRenderer: {
@@ -29,6 +31,8 @@ function mockInnerTubeSuccess(segments: Array<{ text: string; start: number; dur
 
 function mockInnerTubeASRSuccess(segments: Array<{ text: string; t: number; d: number }>) {
   mockFetch.mockResolvedValueOnce({
+    ok: true,
+    status: 200,
     json: async () => ({
       captions: {
         playerCaptionsTracklistRenderer: {
@@ -50,12 +54,21 @@ function mockInnerTubeASRSuccess(segments: Array<{ text: string; t: number; d: n
 function mockInnerTubeNoCaptions() {
   // ANDROID client returns no captions
   mockFetch.mockResolvedValueOnce({
+    ok: true,
+    status: 200,
     json: async () => ({ playabilityStatus: { status: 'OK' }, captions: null }),
   })
   // WEB client also returns no captions
   mockFetch.mockResolvedValueOnce({
+    ok: true,
+    status: 200,
     json: async () => ({ playabilityStatus: { status: 'OK' }, captions: null }),
   })
+}
+
+function mockInnerTubeHTTPRejection(file_status = 403) {
+  mockFetch.mockResolvedValueOnce({ ok: false, status: file_status, json: async () => ({}) })
+  mockFetch.mockResolvedValueOnce({ ok: false, status: file_status, json: async () => ({}) })
 }
 
 function mockInnerTubeFetchError() {
@@ -141,7 +154,46 @@ describe('fetchTranscript', () => {
 
     expect(result.success).toBe(false)
     expect(result.transcript).toBeNull()
-    expect(result.error).toBe('Transcripts are disabled for this video')
+    expect(result.error).toBe('Transcripts are not available for this video')
+  })
+
+  it('handles HTTP rejection from YouTube API', async () => {
+    mockInnerTubeHTTPRejection(403)
+    const result = await fetchTranscript('rejected-video')
+    expect(result.success).toBe(false)
+    expect(result.error).toBe('YouTube API rejected the request - InnerTube client versions may be outdated')
+  })
+
+  it('handles HTTP 429 rate limit from YouTube API', async () => {
+    mockInnerTubeHTTPRejection(429)
+    const result = await fetchTranscript('ratelimited-video')
+    expect(result.success).toBe(false)
+    expect(result.error).toBe('YouTube API rejected the request - InnerTube client versions may be outdated')
+  })
+
+  it('falls back to second client when first gets HTTP rejection', async () => {
+    // ANDROID gets 403
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({}) })
+    // WEB succeeds
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        captions: {
+          playerCaptionsTracklistRenderer: {
+            captionTracks: [{ languageCode: 'en', kind: 'asr', baseUrl: 'https://youtube.com/api/timedtext?v=test' }],
+          },
+        },
+      }),
+    })
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: async () => '<?xml version="1.0"?><transcript><text start="0" dur="1">Fallback works</text></transcript>',
+    })
+    const result = await fetchTranscript('fallback-video')
+    expect(result.success).toBe(true)
+    expect(result.transcript).toContain('Fallback works')
+    expect(mockFetch).toHaveBeenCalledTimes(3)
   })
 
   it('handles network errors gracefully', async () => {
