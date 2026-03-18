@@ -5,41 +5,16 @@ import { fetchTranscript } from '@/lib/youtube/transcript'
 import { parseTranscript } from '@/lib/transcript/parse'
 import { chunkTranscript } from '@/lib/embeddings/chunker'
 // Dynamic import used at call site to avoid ONNX native library crash on module load
-import { enqueueJob } from './queue'
 import { generateText } from '@/lib/claude/client'
 import { buildExtractionPrompt } from '@/lib/claude/prompts/extract'
 import { parsePartialJSON } from '@/lib/claude/prompts/parser'
 import { getExtractionForVideo, upsertExtraction } from '@/lib/db/insights'
-import type { Job } from '@/lib/db/schema'
 import type { TranscriptSegment } from '@/lib/embeddings/types'
 import type { ExtractionResult } from '@/lib/claude/prompts/types'
 
-export interface TranscriptJobPayload {
-  videoId: number
-  youtubeId: string
-}
-
-export interface EmbeddingsJobPayload {
-  videoId: number
-}
-
-export async function processJob(job: Job): Promise<void> {
-  switch (job.type) {
-    case 'fetch_transcript':
-      await processFetchTranscript(job.payload)
-      break
-    case 'generate_embeddings':
-      await processGenerateEmbeddings(job.payload)
-      break
-    default:
-      throw new Error(`Unknown job type: ${job.type}`)
-  }
-}
-
 /**
  * Core transcript fetch + store logic. Fetches a YouTube transcript
- * and stores it on the video record. Used by both the job processor
- * (processFetchTranscript) and the RSS feed workflow step.
+ * and stores it on the video record. Used by the RSS feed workflow step.
  */
 export async function fetchAndStoreTranscript(videoId: number, youtubeId: string): Promise<void> {
   const result = await fetchTranscript(youtubeId)
@@ -54,19 +29,6 @@ export async function fetchAndStoreTranscript(videoId: number, youtubeId: string
       updatedAt: new Date(),
     })
     .where(eq(videos.id, videoId))
-}
-
-async function processFetchTranscript(payload: unknown): Promise<void> {
-  const data = payload as Record<string, unknown>
-  const videoId = data.videoId
-  const youtubeId = data.youtubeId
-
-  if (typeof videoId !== 'number' || typeof youtubeId !== 'string') {
-    throw new Error('Invalid transcript job payload')
-  }
-
-  await fetchAndStoreTranscript(videoId, youtubeId)
-  await enqueueJob('generate_embeddings', { videoId })
 }
 
 export async function processGenerateEmbeddings(payload: unknown): Promise<void> {

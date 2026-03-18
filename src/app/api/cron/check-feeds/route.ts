@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server'
 import { fetchChannelFeed, refreshDiscoveryVideos } from '@/lib/automation/rss'
 import { getChannelsForAutoFetch, updateChannelLastFetched } from '@/lib/automation/queries'
 import { findNewVideos, createVideoFromRSS } from '@/lib/automation/delta'
-import { enqueueJob } from '@/lib/automation/queue'
 import { verifyCronSecret } from '@/lib/auth-guards'
 import { start } from 'workflow/api'
 import { rssFeedWorkflow } from '@/workflows/rss-feed'
@@ -25,11 +24,7 @@ export async function GET(request: Request) {
 
         for (const video of newVideos) {
           const videoId = await createVideoFromRSS(video)
-          if (process.env.VERCEL) {
-            await start(rssFeedWorkflow, [videoId, video.youtubeId])
-          } else {
-            await enqueueJob('fetch_transcript', { videoId, youtubeId: video.youtubeId })
-          }
+          await start(rssFeedWorkflow, [videoId, video.youtubeId])
           newVideosQueued++
         }
 
