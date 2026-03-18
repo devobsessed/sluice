@@ -31,8 +31,27 @@ export async function processJob(job: Job): Promise<void> {
   }
 }
 
+/**
+ * Core transcript fetch + store logic. Fetches a YouTube transcript
+ * and stores it on the video record. Used by both the job processor
+ * (processFetchTranscript) and the RSS feed workflow step.
+ */
+export async function fetchAndStoreTranscript(videoId: number, youtubeId: string): Promise<void> {
+  const result = await fetchTranscript(youtubeId)
+
+  if (!result.success || !result.transcript) {
+    throw new Error(`Transcript fetch failed: ${result.error || 'No transcript available'}`)
+  }
+
+  await db.update(videos)
+    .set({
+      transcript: result.transcript,
+      updatedAt: new Date(),
+    })
+    .where(eq(videos.id, videoId))
+}
+
 async function processFetchTranscript(payload: unknown): Promise<void> {
-  // Validate payload shape
   const data = payload as Record<string, unknown>
   const videoId = data.videoId
   const youtubeId = data.youtubeId
@@ -41,22 +60,7 @@ async function processFetchTranscript(payload: unknown): Promise<void> {
     throw new Error('Invalid transcript job payload')
   }
 
-  // Fetch transcript using existing youtube-transcript library
-  const result = await fetchTranscript(youtubeId)
-
-  if (!result.success || !result.transcript) {
-    throw new Error(`Transcript fetch failed: ${result.error || 'No transcript available'}`)
-  }
-
-  // Store transcript in database
-  await db.update(videos)
-    .set({
-      transcript: result.transcript,
-      updatedAt: new Date(),
-    })
-    .where(eq(videos.id, videoId))
-
-  // Queue embedding generation as next step
+  await fetchAndStoreTranscript(videoId, youtubeId)
   await enqueueJob('generate_embeddings', { videoId })
 }
 
