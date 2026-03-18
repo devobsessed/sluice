@@ -1,19 +1,9 @@
 {
   "buildCommand": "next build --webpack",
-  "functions": {
-    "src/app/api/cron/process-jobs/route.ts": {
-      "memory": 3008,
-      "maxDuration": 300
-    }
-  },
   "crons": [
     {
       "path": "/api/cron/check-feeds",
       "schedule": "0 */12 * * *"
-    },
-    {
-      "path": "/api/cron/process-jobs",
-      "schedule": "*/5 * * * *"
     }
   ]
 }
