@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# Vercel Workflow local dev state
+.next/workflow-data/
+
 # production
 /build
 
