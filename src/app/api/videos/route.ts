@@ -7,7 +7,8 @@ import { chunkTranscript } from '@/lib/embeddings/chunker'
 import type { TranscriptSegment } from '@/lib/embeddings/types'
 import { fetchVideoPageMetadata } from '@/lib/youtube/metadata'
 import { startApiTimer } from '@/lib/api-timing'
-import { enqueueJob } from '@/lib/automation/queue'
+import { start } from 'workflow/api'
+import { embeddingsWorkflow } from '@/workflows/embeddings'
 import { requireSession } from '@/lib/auth-guards'
 
 const videoSchema = z.object({
@@ -235,10 +236,10 @@ export async function POST(request: Request) {
 
     const createdVideo = result[0];
 
-    // Auto-embed: local = inline after(), production = job queue (avoids OOM)
+    // Auto-embed: local = inline after(), Vercel = durable workflow
     if (createdVideo && transcript && transcript.trim().length > 0) {
       if (process.env.VERCEL) {
-        await enqueueJob('generate_embeddings', { videoId: createdVideo.id })
+        await start(embeddingsWorkflow, [createdVideo.id])
       } else {
         after(async () => {
           try {
