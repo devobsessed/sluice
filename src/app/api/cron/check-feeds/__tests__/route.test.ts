@@ -295,6 +295,105 @@ describe('GET /api/cron/check-feeds', () => {
     expect(updateChannelLastFetched).not.toHaveBeenCalledWith(1)
   })
 
+  it('still counts video as queued when workflow dispatch fails', async () => {
+    const request = new Request('http://localhost/api/cron/check-feeds', {
+      headers: {
+        authorization: 'Bearer test-secret',
+      },
+    })
+
+    vi.mocked(getChannelsForAutoFetch).mockResolvedValue([
+      {
+        id: 1,
+        channelId: 'channel1',
+        name: 'Channel 1',
+        thumbnailUrl: null,
+        createdAt: new Date(),
+        feedUrl: null,
+        autoFetch: true,
+        lastFetchedAt: null,
+        fetchIntervalHours: 12,
+      },
+    ])
+
+    vi.mocked(fetchChannelFeed).mockResolvedValue({
+      channelId: 'channel1',
+      channelName: 'Channel 1',
+      videos: [
+        {
+          youtubeId: 'video1',
+          title: 'Video 1',
+          channelId: 'channel1',
+          channelName: 'Channel 1',
+          publishedAt: new Date('2024-01-01'),
+          description: 'Description 1',
+        },
+        {
+          youtubeId: 'video2',
+          title: 'Video 2',
+          channelId: 'channel1',
+          channelName: 'Channel 1',
+          publishedAt: new Date('2024-01-02'),
+          description: 'Description 2',
+        },
+      ],
+      fetchedAt: new Date(),
+    })
+
+    vi.mocked(findNewVideos).mockResolvedValue([
+      {
+        youtubeId: 'video1',
+        title: 'Video 1',
+        channelId: 'channel1',
+        channelName: 'Channel 1',
+        publishedAt: new Date('2024-01-01'),
+        description: 'Description 1',
+      },
+      {
+        youtubeId: 'video2',
+        title: 'Video 2',
+        channelId: 'channel1',
+        channelName: 'Channel 1',
+        publishedAt: new Date('2024-01-02'),
+        description: 'Description 2',
+      },
+    ])
+
+    vi.mocked(createVideoFromRSS).mockResolvedValueOnce(201).mockResolvedValueOnce(202)
+
+    // First workflow dispatch fails, second succeeds
+    vi.mocked(start).mockRejectedValueOnce(new Error('Workflow dispatch failed'))
+    vi.mocked(start).mockResolvedValueOnce('run-id-success')
+
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const response = await GET(request)
+
+    expect(response.status).toBe(200)
+    const data = await response.json()
+    // Both videos should be counted as queued even though first workflow failed
+    expect(data).toEqual({ checked: 1, queued: 2 })
+
+    // Verify both videos were created
+    expect(createVideoFromRSS).toHaveBeenCalledTimes(2)
+
+    // Verify both workflow starts were attempted
+    expect(start).toHaveBeenCalledTimes(2)
+    expect(start).toHaveBeenCalledWith(rssFeedWorkflow, [201, 'video1'])
+    expect(start).toHaveBeenCalledWith(rssFeedWorkflow, [202, 'video2'])
+
+    // Verify error was logged for the failed dispatch
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[workflow-dispatch]'),
+      expect.any(Error),
+    )
+
+    // Channel should still be marked as fetched
+    expect(updateChannelLastFetched).toHaveBeenCalledWith(1)
+
+    consoleErrorSpy.mockRestore()
+  })
+
   it('returns 500 on critical error', async () => {
     const request = new Request('http://localhost/api/cron/check-feeds', {
       headers: {

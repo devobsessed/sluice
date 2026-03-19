@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
-import { fetchChannelFeed, refreshDiscoveryVideos } from '@/lib/automation/rss'
-import { getChannelsForAutoFetch, updateChannelLastFetched } from '@/lib/automation/queries'
-import { findNewVideos, createVideoFromRSS } from '@/lib/automation/delta'
-import { verifyCronSecret } from '@/lib/auth-guards'
 import { start } from 'workflow/api'
+
+import { findNewVideos, createVideoFromRSS } from '@/lib/automation/delta'
+import { getChannelsForAutoFetch, updateChannelLastFetched } from '@/lib/automation/queries'
+import { fetchChannelFeed, refreshDiscoveryVideos } from '@/lib/automation/rss'
+import { verifyCronSecret } from '@/lib/auth-guards'
 import { rssFeedWorkflow } from '@/workflows/rss-feed'
 
 export async function GET(request: Request) {
@@ -24,7 +25,11 @@ export async function GET(request: Request) {
 
         for (const video of newVideos) {
           const videoId = await createVideoFromRSS(video)
-          await start(rssFeedWorkflow, [videoId, video.youtubeId])
+          try {
+            await start(rssFeedWorkflow, [videoId, video.youtubeId])
+          } catch (error) {
+            console.error(`[workflow-dispatch] Failed to start RSS feed workflow for video ${videoId} (${video.youtubeId}):`, error)
+          }
           newVideosQueued++
         }
 
