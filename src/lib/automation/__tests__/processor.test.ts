@@ -239,6 +239,16 @@ describe('processGenerateEmbeddings', () => {
       .rejects.toThrow('Invalid embeddings job payload')
   })
 
+  it('throws on null payload', async () => {
+    await expect(processGenerateEmbeddings(null))
+      .rejects.toThrow('Invalid embeddings job payload')
+  })
+
+  it('throws on undefined payload', async () => {
+    await expect(processGenerateEmbeddings(undefined))
+      .rejects.toThrow('Invalid embeddings job payload')
+  })
+
   it('throws when no chunks generated', async () => {
     vi.mocked(db.select).mockReturnValue({
       from: vi.fn().mockReturnThis(),
@@ -484,6 +494,16 @@ describe('processGenerateInsights', () => {
       .rejects.toThrow('Invalid insights job payload')
 
     await expect(processGenerateInsights({}))
+      .rejects.toThrow('Invalid insights job payload')
+  })
+
+  it('throws on null payload', async () => {
+    await expect(processGenerateInsights(null))
+      .rejects.toThrow('Invalid insights job payload')
+  })
+
+  it('throws on undefined payload', async () => {
+    await expect(processGenerateInsights(undefined))
       .rejects.toThrow('Invalid insights job payload')
   })
 

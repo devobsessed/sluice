@@ -12,6 +12,17 @@ import { getExtractionForVideo, upsertExtraction } from '@/lib/db/insights'
 import type { TranscriptSegment } from '@/lib/embeddings/types'
 import type { ExtractionResult } from '@/lib/claude/prompts/types'
 
+function getVideoId(payload: unknown, jobName: string): number {
+  if (payload == null || typeof payload !== 'object') {
+    throw new Error(`Invalid ${jobName} job payload`)
+  }
+  const videoId = (payload as Record<string, unknown>).videoId
+  if (typeof videoId !== 'number') {
+    throw new Error(`Invalid ${jobName} job payload`)
+  }
+  return videoId
+}
+
 /**
  * Core transcript fetch + store logic. Fetches a YouTube transcript
  * and stores it on the video record. Used by the RSS feed workflow step.
@@ -32,13 +43,7 @@ export async function fetchAndStoreTranscript(videoId: number, youtubeId: string
 }
 
 export async function processGenerateEmbeddings(payload: unknown): Promise<void> {
-  // Validate payload
-  const data = payload as Record<string, unknown>
-  const videoId = data.videoId
-
-  if (typeof videoId !== 'number') {
-    throw new Error('Invalid embeddings job payload')
-  }
+  const videoId = getVideoId(payload, 'embeddings')
 
   // Get the video to check it has a transcript
   const result = await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
@@ -80,15 +85,15 @@ export async function processGenerateEmbeddings(payload: unknown): Promise<void>
 }
 
 export async function processGenerateInsights(payload: unknown): Promise<void> {
-  // Validate payload
-  const data = payload as Record<string, unknown>
-  const videoId = data.videoId
+  const videoId = getVideoId(payload, 'insights')
 
-  if (typeof videoId !== 'number') {
-    throw new Error('Invalid insights job payload')
-  }
-
-  // Idempotency: skip if insights already exist
+  // Idempotency: skip if insights already exist.
+  // Note: this is a check-then-act pattern with a theoretical TOCTOU race -
+  // two concurrent workers could both see null and proceed. This is benign:
+  // upsertExtraction() uses ON CONFLICT DO UPDATE on the unique videoId
+  // constraint, so last-write-wins with no data loss. The only cost is a
+  // redundant Claude API call, which is acceptable given workflows run
+  // single-instance per video.
   const existing = await getExtractionForVideo(videoId)
   if (existing) {
     console.log(`[insights-job] Video ${videoId} already has insights, skipping`)
