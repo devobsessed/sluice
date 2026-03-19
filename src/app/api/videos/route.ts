@@ -1,13 +1,14 @@
-import { db, videos, searchVideos, getVideoStats, getDistinctChannels, videoFocusAreas, focusAreas, insights } from "@/lib/db";
-import { eq, inArray } from "drizzle-orm";
-import { NextResponse, after } from "next/server";
-import { z } from "zod";
-import { parseTranscript } from '@/lib/transcript/parse'
+import { eq, inArray } from 'drizzle-orm'
+import { NextResponse, after } from 'next/server'
+import { start } from 'workflow/api'
+import { z } from 'zod'
+
+import { db, videos, searchVideos, getVideoStats, getDistinctChannels, videoFocusAreas, focusAreas, insights } from '@/lib/db'
 import { chunkTranscript } from '@/lib/embeddings/chunker'
 import type { TranscriptSegment } from '@/lib/embeddings/types'
+import { parseTranscript } from '@/lib/transcript/parse'
 import { fetchVideoPageMetadata } from '@/lib/youtube/metadata'
 import { startApiTimer } from '@/lib/api-timing'
-import { start } from 'workflow/api'
 import { embeddingsWorkflow } from '@/workflows/embeddings'
 import { requireSession } from '@/lib/auth-guards'
 
@@ -239,7 +240,11 @@ export async function POST(request: Request) {
     // Auto-embed: local = inline after(), Vercel = durable workflow
     if (createdVideo && transcript && transcript.trim().length > 0) {
       if (process.env.VERCEL) {
-        await start(embeddingsWorkflow, [createdVideo.id])
+        try {
+          await start(embeddingsWorkflow, [createdVideo.id])
+        } catch (error) {
+          console.error(`[workflow-dispatch] Failed to start embeddings workflow for video ${createdVideo.id}:`, error)
+        }
       } else {
         after(async () => {
           try {

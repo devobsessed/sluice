@@ -48,6 +48,16 @@ vi.mock('@/lib/embeddings/chunker', () => ({
   chunkTranscript: vi.fn().mockReturnValue([]),
 }))
 
+// Mock workflow/api
+vi.mock('workflow/api', () => ({
+  start: vi.fn(),
+}))
+
+// Mock embeddings workflow
+vi.mock('@/workflows/embeddings', () => ({
+  embeddingsWorkflow: vi.fn(),
+}))
+
 // Configurable mock state
 let nextVideoId = 1
 let selectDuplicateResult: unknown[] = []
@@ -586,6 +596,45 @@ describe('POST /api/videos', () => {
     expect(data.milestones.totalVideos).toBe(1)
     expect(data.milestones.channelVideoCount).toBe(0)
     expect(data.milestones.isNewChannel).toBe(false)
+  })
+
+  it('returns 201 even when Vercel workflow dispatch fails', async () => {
+    // Simulate Vercel environment
+    const originalVercel = process.env.VERCEL
+    process.env.VERCEL = '1'
+
+    // Make start() reject
+    const { start: mockStart } = await import('workflow/api')
+    vi.mocked(mockStart).mockRejectedValueOnce(new Error('Workflow dispatch failed'))
+
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const request = new Request('http://localhost:3000/api/videos', {
+      method: 'POST',
+      body: JSON.stringify({
+        youtubeId: 'test-workflow-fail',
+        title: 'Workflow Fail Test',
+        channel: 'Test Channel',
+        transcript: 'This is a test transcript with enough characters to pass validation rules here',
+      }),
+    })
+
+    const response = await POST(request)
+    const data = await response.json()
+
+    // Video should still be created successfully
+    expect(response.status).toBe(201)
+    expect(data.video).toBeDefined()
+    expect(data.video.youtubeId).toBe('test-workflow-fail')
+
+    // Error should be logged
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[workflow-dispatch]'),
+      expect.any(Error),
+    )
+
+    consoleErrorSpy.mockRestore()
+    process.env.VERCEL = originalVercel
   })
 })
 
