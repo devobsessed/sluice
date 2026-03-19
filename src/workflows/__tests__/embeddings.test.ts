@@ -1,45 +1,45 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// Mock the processor module before importing the workflow
-vi.mock('@/lib/automation/processor', () => ({
-  processGenerateEmbeddings: vi.fn(),
-  processGenerateInsights: vi.fn(),
+// Mock the shared steps module before importing the workflow
+vi.mock('@/workflows/steps', () => ({
+  generateEmbeddingsStep: vi.fn(),
+  generateInsightsStep: vi.fn(),
 }))
 
 // Import after mocking
 import { embeddingsWorkflow } from '../embeddings'
-import { processGenerateEmbeddings, processGenerateInsights } from '@/lib/automation/processor'
+import { generateEmbeddingsStep, generateInsightsStep } from '@/workflows/steps'
 
 describe('embeddingsWorkflow', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('calls processGenerateEmbeddings then processGenerateInsights with the videoId payload', async () => {
+  it('calls generateEmbeddingsStep then generateInsightsStep with the videoId', async () => {
     const callOrder: string[] = []
 
-    vi.mocked(processGenerateEmbeddings).mockImplementation(async () => {
-      callOrder.push('processGenerateEmbeddings')
+    vi.mocked(generateEmbeddingsStep).mockImplementation(async () => {
+      callOrder.push('generateEmbeddingsStep')
     })
 
-    vi.mocked(processGenerateInsights).mockImplementation(async () => {
-      callOrder.push('processGenerateInsights')
+    vi.mocked(generateInsightsStep).mockImplementation(async () => {
+      callOrder.push('generateInsightsStep')
     })
 
     await embeddingsWorkflow(42)
 
-    expect(processGenerateEmbeddings).toHaveBeenCalledOnce()
-    expect(processGenerateEmbeddings).toHaveBeenCalledWith({ videoId: 42 })
+    expect(generateEmbeddingsStep).toHaveBeenCalledOnce()
+    expect(generateEmbeddingsStep).toHaveBeenCalledWith(42)
 
-    expect(processGenerateInsights).toHaveBeenCalledOnce()
-    expect(processGenerateInsights).toHaveBeenCalledWith({ videoId: 42 })
+    expect(generateInsightsStep).toHaveBeenCalledOnce()
+    expect(generateInsightsStep).toHaveBeenCalledWith(42)
 
     // Verify sequential execution order
-    expect(callOrder).toEqual(['processGenerateEmbeddings', 'processGenerateInsights'])
+    expect(callOrder).toEqual(['generateEmbeddingsStep', 'generateInsightsStep'])
   })
 
-  it('does not call processGenerateInsights when processGenerateEmbeddings fails', async () => {
-    vi.mocked(processGenerateEmbeddings).mockRejectedValue(
+  it('does not call generateInsightsStep when generateEmbeddingsStep fails', async () => {
+    vi.mocked(generateEmbeddingsStep).mockRejectedValue(
       new Error('Video 999 not found or has no transcript')
     )
 
@@ -47,12 +47,12 @@ describe('embeddingsWorkflow', () => {
       'Video 999 not found or has no transcript'
     )
 
-    expect(processGenerateInsights).not.toHaveBeenCalled()
+    expect(generateInsightsStep).not.toHaveBeenCalled()
   })
 
-  it('propagates errors from processGenerateInsights', async () => {
-    vi.mocked(processGenerateEmbeddings).mockResolvedValue(undefined)
-    vi.mocked(processGenerateInsights).mockRejectedValue(
+  it('propagates errors from generateInsightsStep', async () => {
+    vi.mocked(generateEmbeddingsStep).mockResolvedValue(undefined)
+    vi.mocked(generateInsightsStep).mockRejectedValue(
       new Error('Claude returned empty response for video 42')
     )
 
@@ -61,18 +61,18 @@ describe('embeddingsWorkflow', () => {
     )
 
     // Embeddings step was called (and succeeded)
-    expect(processGenerateEmbeddings).toHaveBeenCalledOnce()
+    expect(generateEmbeddingsStep).toHaveBeenCalledOnce()
     // Insights step was called (and failed)
-    expect(processGenerateInsights).toHaveBeenCalledOnce()
+    expect(generateInsightsStep).toHaveBeenCalledOnce()
   })
 
   it('passes through for zero videoId edge case', async () => {
-    vi.mocked(processGenerateEmbeddings).mockResolvedValue(undefined)
-    vi.mocked(processGenerateInsights).mockResolvedValue(undefined)
+    vi.mocked(generateEmbeddingsStep).mockResolvedValue(undefined)
+    vi.mocked(generateInsightsStep).mockResolvedValue(undefined)
 
     await embeddingsWorkflow(0)
 
-    expect(processGenerateEmbeddings).toHaveBeenCalledWith({ videoId: 0 })
-    expect(processGenerateInsights).toHaveBeenCalledWith({ videoId: 0 })
+    expect(generateEmbeddingsStep).toHaveBeenCalledWith(0)
+    expect(generateInsightsStep).toHaveBeenCalledWith(0)
   })
 })

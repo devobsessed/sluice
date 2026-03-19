@@ -1,4 +1,5 @@
-import { fetchAndStoreTranscript, processGenerateEmbeddings, processGenerateInsights } from '@/lib/automation/processor'
+import { fetchAndStoreTranscript } from '@/lib/automation/processor'
+import { generateEmbeddingsStep, generateInsightsStep } from './steps'
 
 /**
  * Durable step that fetches a YouTube transcript and stores it on the video record.
@@ -9,28 +10,6 @@ import { fetchAndStoreTranscript, processGenerateEmbeddings, processGenerateInsi
 async function fetchTranscriptStep(videoId: number, youtubeId: string): Promise<void> {
   'use step'
   await fetchAndStoreTranscript(videoId, youtubeId)
-}
-
-/**
- * Durable step that generates embeddings for a video's transcript.
- * Wraps processGenerateEmbeddings() - same step used in the embeddings workflow.
- *
- * Default WDK retry: 3 attempts on unhandled errors.
- */
-async function generateEmbeddingsStep(videoId: number): Promise<void> {
-  'use step'
-  await processGenerateEmbeddings({ videoId })
-}
-
-/**
- * Durable step that generates AI insights for a video.
- * Wraps processGenerateInsights() - idempotent; safe to retry.
- *
- * Default WDK retry: 3 attempts on unhandled errors.
- */
-async function generateInsightsStep(videoId: number): Promise<void> {
-  'use step'
-  await processGenerateInsights({ videoId })
 }
 
 /**

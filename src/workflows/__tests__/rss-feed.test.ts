@@ -1,34 +1,39 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// Mock the processor module before importing the workflow
+// Mock the processor module (fetchAndStoreTranscript is still imported directly)
 vi.mock('@/lib/automation/processor', () => ({
   fetchAndStoreTranscript: vi.fn(),
-  processGenerateEmbeddings: vi.fn(),
-  processGenerateInsights: vi.fn(),
+}))
+
+// Mock the shared steps module
+vi.mock('@/workflows/steps', () => ({
+  generateEmbeddingsStep: vi.fn(),
+  generateInsightsStep: vi.fn(),
 }))
 
 // Import after mocking
 import { rssFeedWorkflow } from '../rss-feed'
-import { fetchAndStoreTranscript, processGenerateEmbeddings, processGenerateInsights } from '@/lib/automation/processor'
+import { fetchAndStoreTranscript } from '@/lib/automation/processor'
+import { generateEmbeddingsStep, generateInsightsStep } from '@/workflows/steps'
 
 describe('rssFeedWorkflow', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('calls fetchAndStoreTranscript then processGenerateEmbeddings then processGenerateInsights in sequence', async () => {
+  it('calls fetchAndStoreTranscript then generateEmbeddingsStep then generateInsightsStep in sequence', async () => {
     const callOrder: string[] = []
 
     vi.mocked(fetchAndStoreTranscript).mockImplementation(async () => {
       callOrder.push('fetchAndStoreTranscript')
     })
 
-    vi.mocked(processGenerateEmbeddings).mockImplementation(async () => {
-      callOrder.push('processGenerateEmbeddings')
+    vi.mocked(generateEmbeddingsStep).mockImplementation(async () => {
+      callOrder.push('generateEmbeddingsStep')
     })
 
-    vi.mocked(processGenerateInsights).mockImplementation(async () => {
-      callOrder.push('processGenerateInsights')
+    vi.mocked(generateInsightsStep).mockImplementation(async () => {
+      callOrder.push('generateInsightsStep')
     })
 
     await rssFeedWorkflow(42, 'abc123')
@@ -36,17 +41,17 @@ describe('rssFeedWorkflow', () => {
     expect(fetchAndStoreTranscript).toHaveBeenCalledOnce()
     expect(fetchAndStoreTranscript).toHaveBeenCalledWith(42, 'abc123')
 
-    expect(processGenerateEmbeddings).toHaveBeenCalledOnce()
-    expect(processGenerateEmbeddings).toHaveBeenCalledWith({ videoId: 42 })
+    expect(generateEmbeddingsStep).toHaveBeenCalledOnce()
+    expect(generateEmbeddingsStep).toHaveBeenCalledWith(42)
 
-    expect(processGenerateInsights).toHaveBeenCalledOnce()
-    expect(processGenerateInsights).toHaveBeenCalledWith({ videoId: 42 })
+    expect(generateInsightsStep).toHaveBeenCalledOnce()
+    expect(generateInsightsStep).toHaveBeenCalledWith(42)
 
     // Verify three-step sequential execution order
-    expect(callOrder).toEqual(['fetchAndStoreTranscript', 'processGenerateEmbeddings', 'processGenerateInsights'])
+    expect(callOrder).toEqual(['fetchAndStoreTranscript', 'generateEmbeddingsStep', 'generateInsightsStep'])
   })
 
-  it('does not call generateEmbeddings or generateInsights when fetchTranscript fails', async () => {
+  it('does not call generateEmbeddingsStep or generateInsightsStep when fetchTranscript fails', async () => {
     vi.mocked(fetchAndStoreTranscript).mockRejectedValue(
       new Error('Transcript fetch failed: No transcript available')
     )
@@ -56,13 +61,13 @@ describe('rssFeedWorkflow', () => {
     )
 
     expect(fetchAndStoreTranscript).toHaveBeenCalledOnce()
-    expect(processGenerateEmbeddings).not.toHaveBeenCalled()
-    expect(processGenerateInsights).not.toHaveBeenCalled()
+    expect(generateEmbeddingsStep).not.toHaveBeenCalled()
+    expect(generateInsightsStep).not.toHaveBeenCalled()
   })
 
-  it('does not call generateInsights when generateEmbeddings fails', async () => {
+  it('does not call generateInsightsStep when generateEmbeddingsStep fails', async () => {
     vi.mocked(fetchAndStoreTranscript).mockResolvedValue(undefined)
-    vi.mocked(processGenerateEmbeddings).mockRejectedValue(
+    vi.mocked(generateEmbeddingsStep).mockRejectedValue(
       new Error('Video 42 not found or has no transcript')
     )
 
@@ -71,14 +76,14 @@ describe('rssFeedWorkflow', () => {
     )
 
     expect(fetchAndStoreTranscript).toHaveBeenCalledOnce()
-    expect(processGenerateEmbeddings).toHaveBeenCalledOnce()
-    expect(processGenerateInsights).not.toHaveBeenCalled()
+    expect(generateEmbeddingsStep).toHaveBeenCalledOnce()
+    expect(generateInsightsStep).not.toHaveBeenCalled()
   })
 
-  it('propagates errors from generateInsights step', async () => {
+  it('propagates errors from generateInsightsStep', async () => {
     vi.mocked(fetchAndStoreTranscript).mockResolvedValue(undefined)
-    vi.mocked(processGenerateEmbeddings).mockResolvedValue(undefined)
-    vi.mocked(processGenerateInsights).mockRejectedValue(
+    vi.mocked(generateEmbeddingsStep).mockResolvedValue(undefined)
+    vi.mocked(generateInsightsStep).mockRejectedValue(
       new Error('Claude returned empty response for video 42')
     )
 
@@ -88,8 +93,8 @@ describe('rssFeedWorkflow', () => {
 
     // First two steps succeeded
     expect(fetchAndStoreTranscript).toHaveBeenCalledOnce()
-    expect(processGenerateEmbeddings).toHaveBeenCalledOnce()
+    expect(generateEmbeddingsStep).toHaveBeenCalledOnce()
     // Third step was called (and failed)
-    expect(processGenerateInsights).toHaveBeenCalledOnce()
+    expect(generateInsightsStep).toHaveBeenCalledOnce()
   })
 })
