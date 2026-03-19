@@ -26,7 +26,7 @@ vi.mock('@/workflows/rss-feed', () => ({
 }))
 
 import { getChannelsForAutoFetch, updateChannelLastFetched } from '@/lib/automation/queries'
-import { fetchChannelFeed } from '@/lib/automation/rss'
+import { fetchChannelFeed, refreshDiscoveryVideos } from '@/lib/automation/rss'
 import { findNewVideos, createVideoFromRSS } from '@/lib/automation/delta'
 import { start } from 'workflow/api'
 import { rssFeedWorkflow } from '@/workflows/rss-feed'
@@ -94,6 +94,9 @@ describe('GET /api/cron/check-feeds', () => {
     expect(response.status).toBe(200)
     const data = await response.json()
     expect(data).toEqual({ checked: 0, queued: 0 })
+
+    // Verify discovery videos cache was still refreshed (runs even with no channels)
+    expect(refreshDiscoveryVideos).toHaveBeenCalledOnce()
   })
 
   it('processes channels and starts workflows for new videos', async () => {
@@ -212,6 +215,9 @@ describe('GET /api/cron/check-feeds', () => {
     // Verify lastFetchedAt was updated for both channels
     expect(updateChannelLastFetched).toHaveBeenCalledWith(1)
     expect(updateChannelLastFetched).toHaveBeenCalledWith(2)
+
+    // Verify discovery videos cache was refreshed
+    expect(refreshDiscoveryVideos).toHaveBeenCalledOnce()
   })
 
   it('continues processing other channels when one fails', async () => {
