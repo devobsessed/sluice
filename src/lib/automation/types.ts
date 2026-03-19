@@ -13,7 +13,3 @@ export interface RSSFeedResult {
   videos: RSSVideo[]
   fetchedAt: Date
 }
-
-export type JobType = 'fetch_transcript' | 'generate_embeddings'
-
-export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed'

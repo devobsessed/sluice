@@ -5,69 +5,45 @@ import { fetchTranscript } from '@/lib/youtube/transcript'
 import { parseTranscript } from '@/lib/transcript/parse'
 import { chunkTranscript } from '@/lib/embeddings/chunker'
 // Dynamic import used at call site to avoid ONNX native library crash on module load
-import { enqueueJob } from './queue'
-import type { Job } from '@/lib/db/schema'
+import { generateText } from '@/lib/claude/client'
+import { buildExtractionPrompt } from '@/lib/claude/prompts/extract'
+import { parsePartialJSON } from '@/lib/claude/prompts/parser'
+import { getExtractionForVideo, upsertExtraction } from '@/lib/db/insights'
 import type { TranscriptSegment } from '@/lib/embeddings/types'
+import type { ExtractionResult } from '@/lib/claude/prompts/types'
 
-export interface TranscriptJobPayload {
-  videoId: number
-  youtubeId: string
-}
-
-export interface EmbeddingsJobPayload {
-  videoId: number
-}
-
-export async function processJob(job: Job): Promise<void> {
-  switch (job.type) {
-    case 'fetch_transcript':
-      await processFetchTranscript(job.payload)
-      break
-    case 'generate_embeddings':
-      await processGenerateEmbeddings(job.payload)
-      break
-    default:
-      throw new Error(`Unknown job type: ${job.type}`)
+function getVideoId(payload: unknown, jobName: string): number {
+  if (payload == null || typeof payload !== 'object') {
+    throw new Error(`Invalid ${jobName} job payload`)
   }
+  const videoId = (payload as Record<string, unknown>).videoId
+  if (typeof videoId !== 'number') {
+    throw new Error(`Invalid ${jobName} job payload`)
+  }
+  return videoId
 }
 
-async function processFetchTranscript(payload: unknown): Promise<void> {
-  // Validate payload shape
-  const data = payload as Record<string, unknown>
-  const videoId = data.videoId
-  const youtubeId = data.youtubeId
-
-  if (typeof videoId !== 'number' || typeof youtubeId !== 'string') {
-    throw new Error('Invalid transcript job payload')
-  }
-
-  // Fetch transcript using existing youtube-transcript library
+/**
+ * Core transcript fetch + store logic. Fetches a YouTube transcript
+ * and stores it on the video record. Used by the RSS feed workflow step.
+ */
+export async function fetchAndStoreTranscript(videoId: number, youtubeId: string): Promise<void> {
   const result = await fetchTranscript(youtubeId)
 
   if (!result.success || !result.transcript) {
     throw new Error(`Transcript fetch failed: ${result.error || 'No transcript available'}`)
   }
 
-  // Store transcript in database
   await db.update(videos)
     .set({
       transcript: result.transcript,
       updatedAt: new Date(),
     })
     .where(eq(videos.id, videoId))
-
-  // Queue embedding generation as next step
-  await enqueueJob('generate_embeddings', { videoId })
 }
 
-async function processGenerateEmbeddings(payload: unknown): Promise<void> {
-  // Validate payload
-  const data = payload as Record<string, unknown>
-  const videoId = data.videoId
-
-  if (typeof videoId !== 'number') {
-    throw new Error('Invalid embeddings job payload')
-  }
+export async function processGenerateEmbeddings(payload: unknown): Promise<void> {
+  const videoId = getVideoId(payload, 'embeddings')
 
   // Get the video to check it has a transcript
   const result = await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
@@ -106,4 +82,74 @@ async function processGenerateEmbeddings(payload: unknown): Promise<void> {
   // Dynamic import to avoid ONNX native library crash on module load
   const { embedChunks } = await import('@/lib/embeddings/service')
   await embedChunks(chunkedSegments, undefined, videoId)
+}
+
+export async function processGenerateInsights(payload: unknown): Promise<void> {
+  const videoId = getVideoId(payload, 'insights')
+
+  // Idempotency: skip if insights already exist.
+  // Note: this is a check-then-act pattern with a theoretical TOCTOU race -
+  // two concurrent workers could both see null and proceed. This is benign:
+  // upsertExtraction() uses ON CONFLICT DO UPDATE on the unique videoId
+  // constraint, so last-write-wins with no data loss. The only cost is a
+  // redundant Claude API call, which is acceptable given workflows run
+  // single-instance per video.
+  const existing = await getExtractionForVideo(videoId)
+  if (existing) {
+    console.log(`[insights-job] Video ${videoId} already has insights, skipping`)
+    return
+  }
+
+  // Get the video to build the extraction prompt
+  const result = await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
+  const video = result[0]
+
+  if (!video) {
+    throw new Error(`Video ${videoId} not found`)
+  }
+
+  if (!video.transcript) {
+    throw new Error(`Video ${videoId} has no transcript`)
+  }
+
+  // Build prompt and call Claude API (non-streaming)
+  const prompt = buildExtractionPrompt({
+    title: video.title,
+    channel: video.channel ?? '',
+    transcript: video.transcript,
+  })
+
+  const rawResponse = await generateText(prompt)
+
+  if (!rawResponse || rawResponse.trim() === '') {
+    throw new Error(`Claude returned empty response for video ${videoId}`)
+  }
+
+  // Parse the JSON response
+  const parsed = parsePartialJSON(rawResponse)
+
+  if (!parsed) {
+    throw new Error(`Failed to parse extraction response for video ${videoId}`)
+  }
+
+  // Validate minimum required sections before persisting
+  if (!parsed.contentType || !parsed.summary || !parsed.insights || !parsed.actionItems) {
+    throw new Error(`Incomplete extraction for video ${videoId}: missing required sections`)
+  }
+
+  // Fill in claudeCode default if missing (same logic as ExtractionProvider's isCompleteExtraction)
+  if (!parsed.claudeCode) {
+    parsed.claudeCode = {
+      applicable: false,
+      skills: [],
+      commands: [],
+      agents: [],
+      hooks: [],
+      rules: [],
+    }
+  }
+
+  // Persist to database
+  await upsertExtraction(videoId, parsed as ExtractionResult)
+  console.log(`[insights-job] Generated insights for video ${videoId} (type: ${parsed.contentType})`)
 }

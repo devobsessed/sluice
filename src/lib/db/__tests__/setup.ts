@@ -20,7 +20,17 @@ export async function setupTestDb() {
 
   // Clean tables before each test — use Drizzle's execute to ensure
   // TRUNCATE goes through the same connection management as inserts
-  await testDb!.execute(sql`TRUNCATE videos, insights, channels, settings, chunks, relationships, temporal_metadata, focus_areas, video_focus_areas, personas, jobs, "user", session, account, verification, access_requests CASCADE`);
+  await testDb!.execute(sql`
+    TRUNCATE
+      videos, insights, channels, settings,
+      chunks, relationships, temporal_metadata,
+      focus_areas, video_focus_areas,
+      personas, jobs,
+      "user", session, account, verification, access_requests,
+      discovery_videos,
+      jwks, oauth_client, oauth_access_token, oauth_refresh_token, oauth_consent
+    CASCADE
+  `)
 
   return testDb!;
 }

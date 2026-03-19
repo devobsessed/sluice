@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# Vercel Workflow local dev state
+.next/workflow-data/
+
 # production
 /build
 
@@ -55,3 +58,4 @@ next-env.d.ts
 *.db
 .code-captain/
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
