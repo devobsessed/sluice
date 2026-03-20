@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { ChevronRight } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { ThemeToggle } from '@/components/settings/ThemeToggle'
@@ -10,12 +11,20 @@ import { McpSetupGuide } from '@/components/settings/McpSetupGuide'
 type View = 'landing' | 'guide'
 
 export function SettingsContent() {
-  const [view, setView] = useState<View>('landing')
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const initialView = searchParams.get('view') === 'guide' ? 'guide' : 'landing'
+  const [view, setView] = useState<View>(initialView)
+
+  const navigateTo = (target: View) => {
+    setView(target)
+    router.replace(target === 'guide' ? '/settings?view=guide' : '/settings', { scroll: false })
+  }
 
   if (view === 'guide') {
     return (
       <div key="guide" className="animate-in fade-in duration-150">
-        <McpSetupGuide onBack={() => setView('landing')} />
+        <McpSetupGuide onBack={() => navigateTo('landing')} />
       </div>
     )
   }
@@ -37,13 +46,13 @@ export function SettingsContent() {
           <h2 className="text-lg font-semibold mb-4">Integrations</h2>
           <Card
             className="cursor-pointer hover:bg-accent/50 transition-colors py-0"
-            onClick={() => setView('guide')}
+            onClick={() => navigateTo('guide')}
             role="button"
             tabIndex={0}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault()
-                setView('guide')
+                navigateTo('guide')
               }
             }}
           >
