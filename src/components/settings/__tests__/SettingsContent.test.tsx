@@ -2,6 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { SettingsContent } from '../SettingsContent'
 
+const mockReplace = vi.fn()
+const mockGet = vi.fn().mockReturnValue(null)
+
+// Mock next/navigation
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => ({ get: mockGet }),
+  useRouter: () => ({ replace: mockReplace }),
+}))
+
 // Mock usePageTitle (used by layout context - mock in case sub-components trigger it)
 vi.mock('@/components/layout/PageTitleContext', () => ({
   usePageTitle: () => ({ setPageTitle: vi.fn() }),
@@ -20,6 +29,7 @@ vi.mock('@/lib/auth-client', () => ({
 describe('SettingsContent', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockGet.mockReturnValue(null)
   })
 
   it('renders the settings landing with Appearance and Integrations sections', () => {
@@ -33,27 +43,29 @@ describe('SettingsContent', () => {
     ).toBeInTheDocument()
   })
 
-  it('switches to guide view when CTA card is clicked', () => {
+  it('renders guide view when URL has ?view=guide', () => {
+    mockGet.mockReturnValue('guide')
     render(<SettingsContent />)
-
-    fireEvent.click(screen.getByText('Claude Desktop'))
 
     expect(screen.getByText('Back to Settings')).toBeInTheDocument()
     expect(screen.getByText('Connect Sluice to Claude Desktop')).toBeInTheDocument()
     expect(screen.queryByText('Integrations')).not.toBeInTheDocument()
   })
 
-  it('returns to landing when back button is clicked', () => {
+  it('calls router.replace with guide URL when CTA card is clicked', () => {
     render(<SettingsContent />)
 
-    // Navigate to guide
     fireEvent.click(screen.getByText('Claude Desktop'))
-    expect(screen.getByText('Back to Settings')).toBeInTheDocument()
 
-    // Navigate back
+    expect(mockReplace).toHaveBeenCalledWith('/settings?view=guide', { scroll: false })
+  })
+
+  it('calls router.replace with landing URL when back button is clicked', () => {
+    mockGet.mockReturnValue('guide')
+    render(<SettingsContent />)
+
     fireEvent.click(screen.getByText('Back to Settings'))
 
-    expect(screen.getByText('Integrations')).toBeInTheDocument()
-    expect(screen.queryByText('Back to Settings')).not.toBeInTheDocument()
+    expect(mockReplace).toHaveBeenCalledWith('/settings', { scroll: false })
   })
 })
