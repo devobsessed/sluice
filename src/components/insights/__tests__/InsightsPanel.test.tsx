@@ -386,6 +386,247 @@ describe('InsightsPanel', () => {
     });
   });
 
+  describe('Production Empty States', () => {
+    const originalEnv = process.env.NEXT_PUBLIC_VERCEL
+
+    afterEach(() => {
+      if (originalEnv === undefined) {
+        delete process.env.NEXT_PUBLIC_VERCEL
+      } else {
+        process.env.NEXT_PUBLIC_VERCEL = originalEnv
+      }
+    })
+
+    describe('Generating state (production, video < 10 min old)', () => {
+      it('shows "Insights are on their way" message when video is recent', () => {
+        process.env.NEXT_PUBLIC_VERCEL = '1'
+        const onExtract = vi.fn()
+        const recentDate = new Date(Date.now() - 3 * 60 * 1000) // 3 min ago
+
+        render(
+          <InsightsPanel
+            status="idle"
+            extractionData={{}}
+            onExtract={onExtract}
+            videoCreatedAt={recentDate}
+          />
+        )
+
+        expect(screen.getByText('Insights are on their way')).toBeInTheDocument()
+      })
+
+      it('shows relative timestamp for a video added 3 minutes ago', () => {
+        process.env.NEXT_PUBLIC_VERCEL = '1'
+        const onExtract = vi.fn()
+        const recentDate = new Date(Date.now() - 3 * 60 * 1000)
+
+        render(
+          <InsightsPanel
+            status="idle"
+            extractionData={{}}
+            onExtract={onExtract}
+            videoCreatedAt={recentDate}
+          />
+        )
+
+        expect(screen.getByText('Added 3 minutes ago')).toBeInTheDocument()
+      })
+
+      it('shows "Added just now" for video created within the last minute', () => {
+        process.env.NEXT_PUBLIC_VERCEL = '1'
+        const onExtract = vi.fn()
+        const justNow = new Date(Date.now() - 30 * 1000) // 30 sec ago
+
+        render(
+          <InsightsPanel
+            status="idle"
+            extractionData={{}}
+            onExtract={onExtract}
+            videoCreatedAt={justNow}
+          />
+        )
+
+        expect(screen.getByText('Added just now')).toBeInTheDocument()
+      })
+
+      it('applies breathing animation class to Sparkles icon in generating state', () => {
+        process.env.NEXT_PUBLIC_VERCEL = '1'
+        const onExtract = vi.fn()
+        const recentDate = new Date(Date.now() - 2 * 60 * 1000)
+        const { container } = render(
+          <InsightsPanel
+            status="idle"
+            extractionData={{}}
+            onExtract={onExtract}
+            videoCreatedAt={recentDate}
+          />
+        )
+
+        const sparkles = container.querySelector('svg.animate-breathe')
+        expect(sparkles).toBeInTheDocument()
+      })
+
+      it('does not show an Extract button in generating state', () => {
+        process.env.NEXT_PUBLIC_VERCEL = '1'
+        const onExtract = vi.fn()
+        const recentDate = new Date(Date.now() - 2 * 60 * 1000)
+
+        render(
+          <InsightsPanel
+            status="idle"
+            extractionData={{}}
+            onExtract={onExtract}
+            videoCreatedAt={recentDate}
+          />
+        )
+
+        expect(screen.queryByRole('button')).not.toBeInTheDocument()
+      })
+    })
+
+    describe('Timeout state (production, video >= 10 min old)', () => {
+      it('shows "Insights didn\'t arrive as expected" message when video is old', () => {
+        process.env.NEXT_PUBLIC_VERCEL = '1'
+        const onExtract = vi.fn()
+        const oldDate = new Date(Date.now() - 15 * 60 * 1000) // 15 min ago
+
+        render(
+          <InsightsPanel
+            status="idle"
+            extractionData={{}}
+            onExtract={onExtract}
+            videoCreatedAt={oldDate}
+          />
+        )
+
+        expect(screen.getByText(/Insights didn.t arrive as expected/)).toBeInTheDocument()
+      })
+
+      it('shows "Generate Insights" button in timeout state', () => {
+        process.env.NEXT_PUBLIC_VERCEL = '1'
+        const onExtract = vi.fn()
+        const oldDate = new Date(Date.now() - 15 * 60 * 1000)
+
+        render(
+          <InsightsPanel
+            status="idle"
+            extractionData={{}}
+            onExtract={onExtract}
+            videoCreatedAt={oldDate}
+          />
+        )
+
+        expect(screen.getByRole('button', { name: /generate insights/i })).toBeInTheDocument()
+      })
+
+      it('calls onExtract when Generate Insights button is clicked', async () => {
+        const user = userEvent.setup()
+        process.env.NEXT_PUBLIC_VERCEL = '1'
+        const onExtract = vi.fn()
+        const oldDate = new Date(Date.now() - 15 * 60 * 1000)
+
+        render(
+          <InsightsPanel
+            status="idle"
+            extractionData={{}}
+            onExtract={onExtract}
+            videoCreatedAt={oldDate}
+          />
+        )
+
+        await user.click(screen.getByRole('button', { name: /generate insights/i }))
+        expect(onExtract).toHaveBeenCalledTimes(1)
+      })
+
+      it('shows timeout state at exactly 10 minutes old', () => {
+        process.env.NEXT_PUBLIC_VERCEL = '1'
+        const onExtract = vi.fn()
+        const exactlyTenMin = new Date(Date.now() - 10 * 60 * 1000)
+
+        render(
+          <InsightsPanel
+            status="idle"
+            extractionData={{}}
+            onExtract={onExtract}
+            videoCreatedAt={exactlyTenMin}
+          />
+        )
+
+        expect(screen.getByText(/Insights didn.t arrive as expected/)).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /generate insights/i })).toBeInTheDocument()
+      })
+
+      it('applies crossfade transition class in timeout state', () => {
+        process.env.NEXT_PUBLIC_VERCEL = '1'
+        const onExtract = vi.fn()
+        const oldDate = new Date(Date.now() - 15 * 60 * 1000)
+        const { container } = render(
+          <InsightsPanel
+            status="idle"
+            extractionData={{}}
+            onExtract={onExtract}
+            videoCreatedAt={oldDate}
+          />
+        )
+
+        const wrapper = container.firstChild as HTMLElement
+        expect(wrapper).toHaveClass('transition-opacity')
+      })
+    })
+
+    describe('Local state (no VERCEL env)', () => {
+      it('shows original empty state without VERCEL env', () => {
+        delete process.env.NEXT_PUBLIC_VERCEL
+        const onExtract = vi.fn()
+
+        render(
+          <InsightsPanel
+            status="idle"
+            extractionData={{}}
+            onExtract={onExtract}
+            videoCreatedAt={new Date(Date.now() - 2 * 60 * 1000)}
+          />
+        )
+
+        expect(screen.getByText('No insights generated yet')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /extract insights/i })).toBeInTheDocument()
+      })
+
+      it('shows original empty state when videoCreatedAt is not provided', () => {
+        process.env.NEXT_PUBLIC_VERCEL = '1'
+        const onExtract = vi.fn()
+
+        render(
+          <InsightsPanel
+            status="idle"
+            extractionData={{}}
+            onExtract={onExtract}
+          />
+        )
+
+        expect(screen.getByText('No insights generated yet')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /extract insights/i })).toBeInTheDocument()
+      })
+
+      it('shows original empty state with empty string VERCEL env', () => {
+        process.env.NEXT_PUBLIC_VERCEL = ''
+        const onExtract = vi.fn()
+
+        render(
+          <InsightsPanel
+            status="idle"
+            extractionData={{}}
+            onExtract={onExtract}
+            videoCreatedAt={new Date(Date.now() - 2 * 60 * 1000)}
+          />
+        )
+
+        expect(screen.getByText('No insights generated yet')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /extract insights/i })).toBeInTheDocument()
+      })
+    })
+  })
+
   describe('GPU Performance Optimizations', () => {
     it('adds will-change-transform to large spinner during streaming', () => {
       const onExtract = vi.fn();

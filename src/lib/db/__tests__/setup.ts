@@ -19,17 +19,33 @@ export async function setupTestDb() {
   }
 
   // Clean tables before each test — use Drizzle's execute to ensure
-  // TRUNCATE goes through the same connection management as inserts
+  // TRUNCATE goes through the same connection management as inserts.
+  // Uses DO block to only truncate tables that exist in the test database,
+  // avoiding errors when schema hasn't been fully pushed.
   await testDb!.execute(sql`
-    TRUNCATE
-      videos, insights, channels, settings,
-      chunks, relationships, temporal_metadata,
-      focus_areas, video_focus_areas,
-      personas, jobs,
-      "user", session, account, verification, access_requests,
-      discovery_videos,
-      jwks, oauth_client, oauth_access_token, oauth_refresh_token, oauth_consent
-    CASCADE
+    DO $$
+    DECLARE
+      tbl text;
+      existing text[] := '{}';
+      all_tables text[] := ARRAY[
+        'videos', 'insights', 'channels', 'settings',
+        'chunks', 'relationships', 'temporal_metadata',
+        'focus_areas', 'video_focus_areas',
+        'personas', 'jobs',
+        'user', 'session', 'account', 'verification', 'access_requests',
+        'discovery_videos',
+        'jwks', 'oauth_client', 'oauth_access_token', 'oauth_refresh_token', 'oauth_consent'
+      ];
+    BEGIN
+      FOREACH tbl IN ARRAY all_tables LOOP
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = tbl) THEN
+          existing := existing || tbl;
+        END IF;
+      END LOOP;
+      IF array_length(existing, 1) > 0 THEN
+        EXECUTE 'TRUNCATE ' || (SELECT string_agg(quote_ident(t), ', ') FROM unnest(existing) AS t) || ' CASCADE';
+      END IF;
+    END $$
   `)
 
   return testDb!;

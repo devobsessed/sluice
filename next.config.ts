@@ -2,6 +2,9 @@ import type { NextConfig } from "next"
 import { withWorkflow } from 'workflow/next'
 
 const nextConfig: NextConfig = {
+  env: {
+    NEXT_PUBLIC_VERCEL: process.env.VERCEL || '',
+  },
   serverExternalPackages: [
     // Agent SDK spawns a subprocess (cli.js) — must stay external so webpack
     // doesn't try to bundle it. Only used locally (no API key path).
