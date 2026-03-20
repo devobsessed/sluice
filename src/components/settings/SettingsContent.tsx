@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { ChevronRight } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
@@ -13,11 +12,9 @@ type View = 'landing' | 'guide'
 export function SettingsContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
-  const initialView = searchParams.get('view') === 'guide' ? 'guide' : 'landing'
-  const [view, setView] = useState<View>(initialView)
+  const view: View = searchParams.get('view') === 'guide' ? 'guide' : 'landing'
 
   const navigateTo = (target: View) => {
-    setView(target)
     router.replace(target === 'guide' ? '/settings?view=guide' : '/settings', { scroll: false })
   }
 

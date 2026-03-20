@@ -43,17 +43,7 @@ describe('SettingsContent', () => {
     ).toBeInTheDocument()
   })
 
-  it('switches to guide view when CTA card is clicked', () => {
-    render(<SettingsContent />)
-
-    fireEvent.click(screen.getByText('Claude Desktop'))
-
-    expect(screen.getByText('Back to Settings')).toBeInTheDocument()
-    expect(screen.getByText('Connect Sluice to Claude Desktop')).toBeInTheDocument()
-    expect(screen.queryByText('Integrations')).not.toBeInTheDocument()
-  })
-
-  it('opens guide view directly when URL has ?view=guide', () => {
+  it('renders guide view when URL has ?view=guide', () => {
     mockGet.mockReturnValue('guide')
     render(<SettingsContent />)
 
@@ -62,27 +52,20 @@ describe('SettingsContent', () => {
     expect(screen.queryByText('Integrations')).not.toBeInTheDocument()
   })
 
-  it('updates URL when navigating between views', () => {
+  it('calls router.replace with guide URL when CTA card is clicked', () => {
     render(<SettingsContent />)
 
     fireEvent.click(screen.getByText('Claude Desktop'))
-    expect(mockReplace).toHaveBeenCalledWith('/settings?view=guide', { scroll: false })
 
-    fireEvent.click(screen.getByText('Back to Settings'))
-    expect(mockReplace).toHaveBeenCalledWith('/settings', { scroll: false })
+    expect(mockReplace).toHaveBeenCalledWith('/settings?view=guide', { scroll: false })
   })
 
-  it('returns to landing when back button is clicked', () => {
+  it('calls router.replace with landing URL when back button is clicked', () => {
+    mockGet.mockReturnValue('guide')
     render(<SettingsContent />)
 
-    // Navigate to guide
-    fireEvent.click(screen.getByText('Claude Desktop'))
-    expect(screen.getByText('Back to Settings')).toBeInTheDocument()
-
-    // Navigate back
     fireEvent.click(screen.getByText('Back to Settings'))
 
-    expect(screen.getByText('Integrations')).toBeInTheDocument()
-    expect(screen.queryByText('Back to Settings')).not.toBeInTheDocument()
+    expect(mockReplace).toHaveBeenCalledWith('/settings', { scroll: false })
   })
 })
