@@ -60,6 +60,7 @@ export function InsightsTabs({ video, onSeek, className }: InsightsTabsProps) {
           onCancel={insightId ? cancel : undefined}
           agentStatus={agentStatus}
           agentError={agentError || undefined}
+          videoCreatedAt={video.createdAt}
         />
       </TabsContent>
 

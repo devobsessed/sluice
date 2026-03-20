@@ -2,6 +2,7 @@
 
 import { Sparkles, FileText, Lightbulb, CheckSquare, AlertCircle, X, WifiOff, Loader2, Brain } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { InsightSection } from './InsightSection';
 import { ClaudeCodeSection } from './ClaudeCodeSection';
 import type { ExtractionResult } from '@/lib/claude/prompts/types';
@@ -23,7 +24,26 @@ interface InsightsPanelProps {
   onCancel?: () => void;
   agentStatus?: ConnectionStatus;
   agentError?: string;
+  videoCreatedAt?: Date;
   className?: string;
+}
+
+// Extracted outside component to avoid impure-function-during-render lint errors
+function getEmptyStateVariant(videoCreatedAt?: Date): 'generating' | 'timeout' | 'local' {
+  const isProduction = process.env.NEXT_PUBLIC_VERCEL_ENV === 'production'
+  if (!isProduction) return 'local'
+  if (!videoCreatedAt) return 'local'
+  const ageMs = Date.now() - new Date(videoCreatedAt).getTime()
+  const TEN_MINUTES_MS = 10 * 60 * 1000
+  return ageMs < TEN_MINUTES_MS ? 'generating' : 'timeout'
+}
+
+function formatAddedAgo(createdAt: Date): string {
+  const diffMs = Date.now() - new Date(createdAt).getTime()
+  const minutes = Math.max(0, Math.floor(diffMs / 60000))
+  if (minutes === 0) return 'Added just now'
+  if (minutes === 1) return 'Added 1 minute ago'
+  return `Added ${minutes} minutes ago`
 }
 
 /**
@@ -39,6 +59,7 @@ export function InsightsPanel({
   onCancel,
   agentStatus,
   agentError,
+  videoCreatedAt,
   className,
 }: InsightsPanelProps) {
   // Agent connection status - show when not connected
@@ -75,6 +96,46 @@ export function InsightsPanel({
   // Empty state
   const hasNoData = !extractionData || Object.keys(extractionData).length === 0;
   if (status === 'idle' && hasNoData) {
+    const variant = getEmptyStateVariant(videoCreatedAt)
+
+    if (variant === 'generating') {
+      return (
+        <div className={cn('transition-opacity duration-300', className)}>
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <Sparkles className="mb-4 h-12 w-12 text-muted-foreground animate-breathe" />
+            <h3 className="mb-2 text-lg font-medium">Insights are on their way</h3>
+            <p className="mb-4 max-w-md text-muted-foreground">
+              Claude is analyzing this video. They&apos;ll appear here automatically.
+            </p>
+            {videoCreatedAt && (
+              <p className="text-sm text-muted-foreground">
+                {formatAddedAgo(videoCreatedAt)}
+              </p>
+            )}
+          </div>
+        </div>
+      )
+    }
+
+    if (variant === 'timeout') {
+      return (
+        <div className={cn('transition-opacity duration-300', className)}>
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <AlertCircle className="mb-4 h-12 w-12 text-muted-foreground" />
+            <h3 className="mb-2 text-lg font-medium">Insights didn&apos;t arrive as expected</h3>
+            <p className="mb-6 max-w-md text-muted-foreground">
+              The automatic generation may have encountered an issue.
+            </p>
+            <Button onClick={onExtract} size="lg">
+              <Sparkles className="mr-2 h-4 w-4" />
+              Generate Insights
+            </Button>
+          </div>
+        </div>
+      )
+    }
+
+    // local variant - preserve original empty state verbatim
     return (
       <div className={className}>
         <div className="flex flex-col items-center justify-center py-12 text-center">

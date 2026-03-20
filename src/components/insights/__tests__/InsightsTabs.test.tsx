@@ -217,4 +217,31 @@ describe('InsightsTabs', () => {
     await user.click(insightsTab);
     expect(screen.getByRole('tab', { name: /insights/i })).toHaveAttribute('data-state', 'active');
   });
+
+  it('threads video.createdAt to InsightsPanel as videoCreatedAt', () => {
+    const originalEnv = process.env.NEXT_PUBLIC_VERCEL_ENV;
+    process.env.NEXT_PUBLIC_VERCEL_ENV = 'production';
+    try {
+      const onSeek = vi.fn();
+      const recentVideo = {
+        ...mockVideo,
+        createdAt: new Date(Date.now() - 2 * 60 * 1000), // 2 min ago
+      };
+      render(
+        <Wrapper>
+          <InsightsTabs video={recentVideo} onSeek={onSeek} />
+        </Wrapper>
+      );
+
+      // With NEXT_PUBLIC_VERCEL_ENV set and a recent createdAt, the generating state
+      // renders - proving createdAt was threaded through to InsightsPanel.
+      expect(screen.getByText('Insights are on their way')).toBeInTheDocument();
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.NEXT_PUBLIC_VERCEL_ENV;
+      } else {
+        process.env.NEXT_PUBLIC_VERCEL_ENV = originalEnv;
+      }
+    }
+  });
 });
