@@ -90,7 +90,7 @@ Triggered by the `check-feeds` cron job when RSS delta detection discovers a new
 
 The `fetchTranscriptStep` is defined locally in `rss-feed.ts` (not shared) because it needs the `youtubeId` parameter that only the RSS path provides. Steps 2 and 3 are the same shared functions from [`steps.ts`](../src/workflows/steps.ts).
 
-Dispatch point: [`src/app/api/cron/check-feeds/route.ts`](../src/app/api/cron/check-feeds/route.ts) line 29.
+Dispatch point: [`src/app/api/cron/check-feeds/route.ts`](../src/app/api/cron/check-feeds/route.ts) line 37.
 
 ---
 

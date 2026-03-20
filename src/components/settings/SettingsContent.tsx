@@ -38,6 +38,14 @@ export function SettingsContent() {
           <Card
             className="cursor-pointer hover:bg-accent/50 transition-colors py-0"
             onClick={() => setView('guide')}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                setView('guide')
+              }
+            }}
           >
             <CardContent className="py-4 flex items-center justify-between">
               <div>
