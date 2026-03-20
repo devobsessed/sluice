@@ -111,6 +111,7 @@ In the Vercel dashboard, go to **Settings > Environment Variables** for your pro
 | `MCP_AUTH_TOKEN` | Any secure random string | Required when `MCP_AUTH_ENABLED=true`. Clients send as `Authorization: Bearer <token>`. |
 | `NEXT_PUBLIC_AGENT_PORT` | `9334` | Only relevant for local dev (WebSocket agent). Not used in production (SSE transport). Can be omitted. |
 | `ALLOWED_EMAIL_DOMAIN` | `devobsessed.com` | Email domain restriction for sign-in. Default: `devobsessed.com`. |
+| `ENABLE_AUTO_FETCH` | `true` | Gates the check-feeds cron. When not `true`, the cron returns immediately without querying the database or dispatching workflows. Leave unset to disable auto-fetch. |
 
 > **Note:** Do NOT set `PORT` or `AGENT_PORT` -- these are local dev settings. Vercel manages ports automatically.
 
@@ -157,27 +158,22 @@ Skip this section if the default `*.vercel.app` domain is sufficient.
 
 ## 6. Verify Cron Jobs
 
-Sluice uses two Vercel Cron Jobs defined in `vercel.json`:
+Sluice uses one Vercel Cron Job defined in `vercel.json`:
 
 | Cron Job | Schedule | Path | Purpose |
 |----------|----------|------|---------|
-| Check Feeds | Every 12 hours (`0 */12 * * *`) | `/api/cron/check-feeds` | Polls RSS feeds for new videos from followed channels |
-| Process Jobs | Every 5 minutes (`*/5 * * * *`) | `/api/cron/process-jobs` | Processes queued jobs (transcript fetch, embedding generation) |
+| Check Feeds | Every 12 hours (`0 */12 * * *`) | `/api/cron/check-feeds` | Polls RSS feeds for new videos, dispatches [Vercel Workflows](docs/vercel-workflows.md) per video |
+
+> **Note:** Job processing (embedding generation, AI insights) is handled by [Vercel Workflows](docs/vercel-workflows.md), which provide durable execution with automatic retry. No separate `process-jobs` cron is needed.
 
 - [ ] Go to Vercel dashboard > **Settings > Cron Jobs**
-- [ ] Verify both cron jobs appear with correct schedules
+- [ ] Verify the `check-feeds` cron job appears with the correct schedule
 - [ ] Vercel automatically sends `Authorization: Bearer <CRON_SECRET>` header to cron endpoints
-- [ ] To manually trigger a cron job for testing:
+- [ ] To manually trigger the cron job for testing:
   ```bash
-  # Check feeds
   curl -H "Authorization: Bearer YOUR_CRON_SECRET" https://your-domain.vercel.app/api/cron/check-feeds
-
-  # Process jobs
-  curl -H "Authorization: Bearer YOUR_CRON_SECRET" https://your-domain.vercel.app/api/cron/process-jobs
   ```
-- [ ] Expected responses:
-  - `check-feeds`: `{"checked": 0, "queued": 0}` (0 channels followed initially)
-  - `process-jobs`: `{"processed": 0, "failed": 0}` (no jobs queued initially)
+- [ ] Expected response: `{"checked": 0, "queued": 0}` (0 channels followed initially)
 
 > **Note:** Vercel Cron Jobs require the Pro plan. On Hobby, crons run at most once per day. On Pro, the minimum interval is 1 minute.
 
@@ -199,7 +195,7 @@ Work through each feature to confirm the production deployment is fully function
 ### 7.2 Embedding Generation
 
 - [ ] Navigate to the video detail page (`/videos/[id]`)
-- [ ] Embeddings generate automatically after video creation (via `after()` hook or job queue)
+- [ ] Embeddings generate automatically after video creation (via Vercel Workflows in production, or `after()` hook locally)
 - [ ] Alternatively, check via API:
   ```bash
   curl https://your-domain.vercel.app/api/videos/VIDEO_ID/embed
@@ -337,6 +333,7 @@ Test MCP endpoints if you use Sluice with Claude Code.
 ### Architecture Notes
 
 - **Agent transport:** Auto-detects based on environment. If `AGENT_AUTH_TOKEN` env var is set, uses SSE via `/api/agent/stream`. If `.agent-token` file exists (local dev only), uses WebSocket on port 9334.
+- **Workflows:** Durable async processing via [Vercel Workflows](docs/vercel-workflows.md). Two workflows: `embeddingsWorkflow` (triggered on video add) and `rssFeedWorkflow` (triggered by RSS discovery). Each step retries independently (3 attempts). Replaces the old job queue for production pipeline processing.
 - **DB pool:** Auto-sizes based on `DATABASE_URL`. Neon URLs (`neon.tech`) get 3 connections with 10s idle timeout. Local PostgreSQL gets 10 connections with 30s idle timeout.
 - **Embeddings:** Model downloads to `/tmp/.cache` on first use (~23MB). Cached within the serverless function instance lifetime. Cold starts take 10-15 seconds.
 - **Cron:** Vercel automatically sends `CRON_SECRET` as `Authorization: Bearer` header to cron endpoints.

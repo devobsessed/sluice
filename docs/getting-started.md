@@ -310,6 +310,7 @@ Embeddings may not have finished generating yet. Check:
 ## What's Next
 
 - **[Core Concepts](core-concepts.md)** — Understand how Sluice's search, embeddings, and personas work under the hood
+- **[Vercel Workflows](vercel-workflows.md)** — How durable async processing works in production
 - **[MCP Tools Reference](mcp-tools.md)** — Connect Sluice to Claude Code and use all 4 MCP tools
 - **[Search Guide](search-guide.md)** — Get better results from hybrid search
 - **[Deployment](../DEPLOY.md)** — Deploy Sluice to Vercel with Neon PostgreSQL

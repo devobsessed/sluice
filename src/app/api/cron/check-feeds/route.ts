@@ -8,6 +8,14 @@ import { verifyCronSecret } from '@/lib/auth-guards'
 import { rssFeedWorkflow } from '@/workflows/rss-feed'
 
 export async function GET(request: Request) {
+  // Feature flag: skip entirely when auto-fetch is not enabled
+  if (process.env.ENABLE_AUTO_FETCH !== 'true') {
+    return NextResponse.json({
+      skipped: true,
+      reason: 'ENABLE_AUTO_FETCH is not enabled',
+    })
+  }
+
   // Verify cron secret (timing-safe, rejects when env unset)
   const authResult = verifyCronSecret(request)
   if (!authResult.valid) {

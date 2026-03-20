@@ -302,20 +302,21 @@ Sluice uses a database-backed job queue for reliable async processing:
 | **Status flow** | `pending` → `processing` → `completed` / `failed` |
 | **Storage** | `jobs` table with JSONB payload |
 
-When you add a video, the embedding generation is queued as a job. The job processor picks it up, generates embeddings, and updates the job status.
+> **Production:** On Vercel, [Vercel Workflows](vercel-workflows.md) replace the job queue for the main pipeline (embedding generation and AI insights). The processor functions in [`src/lib/automation/processor.ts`](../src/lib/automation/processor.ts) are shared between both systems -- workflow steps are thin wrappers around the same logic.
+
+When you add a video locally, the embedding generation runs via Next.js `after()` callback. On Vercel, a durable workflow handles embeddings and insights automatically.
 
 ### Channel Monitoring
 
 Source: [`vercel.json`](../vercel.json) and [`src/app/api/cron/`](../src/app/api/cron/)
 
-When you follow a YouTube channel, Sluice monitors its RSS feed for new videos. Two cron jobs handle this:
+When you follow a YouTube channel, Sluice monitors its RSS feed for new videos:
 
 | Job | Schedule | Path | Purpose |
 |-----|----------|------|---------|
-| `check-feeds` | Every 12 hours | `/api/cron/check-feeds` | Polls RSS feeds, detects new videos via delta comparison, queues transcript fetches |
-| `process-jobs` | Every 5 minutes | `/api/cron/process-jobs` | Processes queued jobs (transcript fetch, embedding generation, insights) |
+| `check-feeds` | Every 12 hours | `/api/cron/check-feeds` | Polls RSS feeds, detects new videos via delta comparison, dispatches [RSS feed workflows](vercel-workflows.md#rss-feed-workflow) |
 
-In production (Vercel), these run as Vercel Cron Jobs authenticated with `CRON_SECRET`. Locally, you can trigger them manually via curl.
+In production (Vercel), this runs as a Vercel Cron Job authenticated with `CRON_SECRET`. When new videos are discovered, the cron dispatches a durable workflow per video that handles transcript fetching, embedding generation, and AI insights. Locally, you can trigger the cron manually via curl.
 
 ---
 
@@ -337,6 +338,7 @@ The transport is auto-detected: the `/api/agent/token` endpoint returns `transpo
 ## Further Reading
 
 - **[Getting Started](getting-started.md)** — Setup walkthrough
+- **[Vercel Workflows](vercel-workflows.md)** — Durable async processing in production
 - **[MCP Tools Reference](mcp-tools.md)** — Complete tool documentation
 - **[Search Guide](search-guide.md)** — Search tips and mode comparison
 - **[CLAUDE.md](../CLAUDE.md)** — Developer reference (code style, API conventions, architecture details)
