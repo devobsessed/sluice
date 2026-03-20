@@ -387,19 +387,19 @@ describe('InsightsPanel', () => {
   });
 
   describe('Production Empty States', () => {
-    const originalEnv = process.env.NEXT_PUBLIC_VERCEL
+    const originalEnv = process.env.NEXT_PUBLIC_VERCEL_ENV
 
     afterEach(() => {
       if (originalEnv === undefined) {
-        delete process.env.NEXT_PUBLIC_VERCEL
+        delete process.env.NEXT_PUBLIC_VERCEL_ENV
       } else {
-        process.env.NEXT_PUBLIC_VERCEL = originalEnv
+        process.env.NEXT_PUBLIC_VERCEL_ENV = originalEnv
       }
     })
 
     describe('Generating state (production, video < 10 min old)', () => {
       it('shows "Insights are on their way" message when video is recent', () => {
-        process.env.NEXT_PUBLIC_VERCEL = '1'
+        process.env.NEXT_PUBLIC_VERCEL_ENV = 'production'
         const onExtract = vi.fn()
         const recentDate = new Date(Date.now() - 3 * 60 * 1000) // 3 min ago
 
@@ -416,7 +416,7 @@ describe('InsightsPanel', () => {
       })
 
       it('shows relative timestamp for a video added 3 minutes ago', () => {
-        process.env.NEXT_PUBLIC_VERCEL = '1'
+        process.env.NEXT_PUBLIC_VERCEL_ENV = 'production'
         const onExtract = vi.fn()
         const recentDate = new Date(Date.now() - 3 * 60 * 1000)
 
@@ -433,7 +433,7 @@ describe('InsightsPanel', () => {
       })
 
       it('shows "Added just now" for video created within the last minute', () => {
-        process.env.NEXT_PUBLIC_VERCEL = '1'
+        process.env.NEXT_PUBLIC_VERCEL_ENV = 'production'
         const onExtract = vi.fn()
         const justNow = new Date(Date.now() - 30 * 1000) // 30 sec ago
 
@@ -450,7 +450,7 @@ describe('InsightsPanel', () => {
       })
 
       it('applies breathing animation class to Sparkles icon in generating state', () => {
-        process.env.NEXT_PUBLIC_VERCEL = '1'
+        process.env.NEXT_PUBLIC_VERCEL_ENV = 'production'
         const onExtract = vi.fn()
         const recentDate = new Date(Date.now() - 2 * 60 * 1000)
         const { container } = render(
@@ -467,7 +467,7 @@ describe('InsightsPanel', () => {
       })
 
       it('does not show an Extract button in generating state', () => {
-        process.env.NEXT_PUBLIC_VERCEL = '1'
+        process.env.NEXT_PUBLIC_VERCEL_ENV = 'production'
         const onExtract = vi.fn()
         const recentDate = new Date(Date.now() - 2 * 60 * 1000)
 
@@ -486,7 +486,7 @@ describe('InsightsPanel', () => {
 
     describe('Timeout state (production, video >= 10 min old)', () => {
       it('shows "Insights didn\'t arrive as expected" message when video is old', () => {
-        process.env.NEXT_PUBLIC_VERCEL = '1'
+        process.env.NEXT_PUBLIC_VERCEL_ENV = 'production'
         const onExtract = vi.fn()
         const oldDate = new Date(Date.now() - 15 * 60 * 1000) // 15 min ago
 
@@ -503,7 +503,7 @@ describe('InsightsPanel', () => {
       })
 
       it('shows "Generate Insights" button in timeout state', () => {
-        process.env.NEXT_PUBLIC_VERCEL = '1'
+        process.env.NEXT_PUBLIC_VERCEL_ENV = 'production'
         const onExtract = vi.fn()
         const oldDate = new Date(Date.now() - 15 * 60 * 1000)
 
@@ -521,7 +521,7 @@ describe('InsightsPanel', () => {
 
       it('calls onExtract when Generate Insights button is clicked', async () => {
         const user = userEvent.setup()
-        process.env.NEXT_PUBLIC_VERCEL = '1'
+        process.env.NEXT_PUBLIC_VERCEL_ENV = 'production'
         const onExtract = vi.fn()
         const oldDate = new Date(Date.now() - 15 * 60 * 1000)
 
@@ -539,7 +539,7 @@ describe('InsightsPanel', () => {
       })
 
       it('shows timeout state at exactly 10 minutes old', () => {
-        process.env.NEXT_PUBLIC_VERCEL = '1'
+        process.env.NEXT_PUBLIC_VERCEL_ENV = 'production'
         const onExtract = vi.fn()
         const exactlyTenMin = new Date(Date.now() - 10 * 60 * 1000)
 
@@ -557,7 +557,7 @@ describe('InsightsPanel', () => {
       })
 
       it('applies crossfade transition class in timeout state', () => {
-        process.env.NEXT_PUBLIC_VERCEL = '1'
+        process.env.NEXT_PUBLIC_VERCEL_ENV = 'production'
         const onExtract = vi.fn()
         const oldDate = new Date(Date.now() - 15 * 60 * 1000)
         const { container } = render(
@@ -576,7 +576,7 @@ describe('InsightsPanel', () => {
 
     describe('Local state (no VERCEL env)', () => {
       it('shows original empty state without VERCEL env', () => {
-        delete process.env.NEXT_PUBLIC_VERCEL
+        delete process.env.NEXT_PUBLIC_VERCEL_ENV
         const onExtract = vi.fn()
 
         render(
@@ -593,7 +593,7 @@ describe('InsightsPanel', () => {
       })
 
       it('shows original empty state when videoCreatedAt is not provided', () => {
-        process.env.NEXT_PUBLIC_VERCEL = '1'
+        process.env.NEXT_PUBLIC_VERCEL_ENV = 'production'
         const onExtract = vi.fn()
 
         render(
@@ -609,7 +609,7 @@ describe('InsightsPanel', () => {
       })
 
       it('shows original empty state with empty string VERCEL env', () => {
-        process.env.NEXT_PUBLIC_VERCEL = ''
+        process.env.NEXT_PUBLIC_VERCEL_ENV = ''
         const onExtract = vi.fn()
 
         render(

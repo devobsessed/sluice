@@ -30,7 +30,7 @@ interface InsightsPanelProps {
 
 // Extracted outside component to avoid impure-function-during-render lint errors
 function getEmptyStateVariant(videoCreatedAt?: Date): 'generating' | 'timeout' | 'local' {
-  const isProduction = !!process.env.NEXT_PUBLIC_VERCEL
+  const isProduction = process.env.NEXT_PUBLIC_VERCEL_ENV === 'production'
   if (!isProduction) return 'local'
   if (!videoCreatedAt) return 'local'
   const ageMs = Date.now() - new Date(videoCreatedAt).getTime()

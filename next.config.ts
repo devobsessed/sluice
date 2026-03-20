@@ -3,7 +3,7 @@ import { withWorkflow } from 'workflow/next'
 
 const nextConfig: NextConfig = {
   env: {
-    NEXT_PUBLIC_VERCEL: process.env.VERCEL || '',
+    NEXT_PUBLIC_VERCEL_ENV: process.env.VERCEL_ENV || '',
   },
   serverExternalPackages: [
     // Agent SDK spawns a subprocess (cli.js) — must stay external so webpack

@@ -219,8 +219,8 @@ describe('InsightsTabs', () => {
   });
 
   it('threads video.createdAt to InsightsPanel as videoCreatedAt', () => {
-    const originalEnv = process.env.NEXT_PUBLIC_VERCEL;
-    process.env.NEXT_PUBLIC_VERCEL = '1';
+    const originalEnv = process.env.NEXT_PUBLIC_VERCEL_ENV;
+    process.env.NEXT_PUBLIC_VERCEL_ENV = 'production';
     try {
       const onSeek = vi.fn();
       const recentVideo = {
@@ -233,14 +233,14 @@ describe('InsightsTabs', () => {
         </Wrapper>
       );
 
-      // With NEXT_PUBLIC_VERCEL set and a recent createdAt, the generating state
+      // With NEXT_PUBLIC_VERCEL_ENV set and a recent createdAt, the generating state
       // renders - proving createdAt was threaded through to InsightsPanel.
       expect(screen.getByText('Insights are on their way')).toBeInTheDocument();
     } finally {
       if (originalEnv === undefined) {
-        delete process.env.NEXT_PUBLIC_VERCEL;
+        delete process.env.NEXT_PUBLIC_VERCEL_ENV;
       } else {
-        process.env.NEXT_PUBLIC_VERCEL = originalEnv;
+        process.env.NEXT_PUBLIC_VERCEL_ENV = originalEnv;
       }
     }
   });
