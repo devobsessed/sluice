@@ -36,12 +36,54 @@ describe('GET /api/cron/check-feeds', () => {
   const originalEnv = process.env
 
   beforeEach(() => {
-    process.env = { ...originalEnv, CRON_SECRET: 'test-secret' }
+    process.env = { ...originalEnv, CRON_SECRET: 'test-secret', ENABLE_AUTO_FETCH: 'true' }
     vi.clearAllMocks()
   })
 
   afterEach(() => {
     process.env = originalEnv
+  })
+
+  it('returns skipped response when ENABLE_AUTO_FETCH is not set', async () => {
+    delete process.env.ENABLE_AUTO_FETCH
+    const request = new Request('http://localhost/api/cron/check-feeds')
+
+    const response = await GET(request)
+
+    expect(response.status).toBe(200)
+    const data = await response.json()
+    expect(data).toEqual({ skipped: true, reason: 'ENABLE_AUTO_FETCH is not enabled' })
+    expect(getChannelsForAutoFetch).not.toHaveBeenCalled()
+  })
+
+  it('returns skipped response when ENABLE_AUTO_FETCH is not "true"', async () => {
+    process.env.ENABLE_AUTO_FETCH = 'false'
+    const request = new Request('http://localhost/api/cron/check-feeds')
+
+    const response = await GET(request)
+
+    expect(response.status).toBe(200)
+    const data = await response.json()
+    expect(data).toEqual({ skipped: true, reason: 'ENABLE_AUTO_FETCH is not enabled' })
+    expect(getChannelsForAutoFetch).not.toHaveBeenCalled()
+  })
+
+  it('proceeds normally when ENABLE_AUTO_FETCH is "true"', async () => {
+    process.env.ENABLE_AUTO_FETCH = 'true'
+    const request = new Request('http://localhost/api/cron/check-feeds', {
+      headers: {
+        authorization: 'Bearer test-secret',
+      },
+    })
+
+    vi.mocked(getChannelsForAutoFetch).mockResolvedValue([])
+
+    const response = await GET(request)
+
+    expect(response.status).toBe(200)
+    const data = await response.json()
+    expect(data).toEqual({ checked: 0, queued: 0 })
+    expect(getChannelsForAutoFetch).toHaveBeenCalledOnce()
   })
 
   it('returns 401 when no auth header', async () => {
