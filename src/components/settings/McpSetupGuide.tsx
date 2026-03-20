@@ -9,13 +9,14 @@ interface McpSetupGuideProps {
 
 export function McpSetupGuide({ onBack }: McpSetupGuideProps) {
   return (
-    <div className="max-w-3xl">
-      {/* Back button */}
-      <Button variant="ghost" size="sm" onClick={onBack} className="mb-6 -ml-2">
+    <div>
+      {/* Back button - outside centered container so it stays left-aligned */}
+      <Button variant="ghost" size="sm" onClick={onBack} className="mb-6">
         <ArrowLeft className="mr-2 size-4" />
         Back to Settings
       </Button>
 
+    <div className="max-w-3xl mx-auto">
       {/* Header */}
       <div className="text-center mb-10 pb-8 border-b">
         <h2 className="text-2xl sm:text-3xl font-bold mb-2">
@@ -254,6 +255,7 @@ export function McpSetupGuide({ onBack }: McpSetupGuideProps) {
           OAuth.
         </p>
       </InfoCallout>
+    </div>
     </div>
   )
 }
