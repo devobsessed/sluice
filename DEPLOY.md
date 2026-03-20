@@ -111,6 +111,7 @@ In the Vercel dashboard, go to **Settings > Environment Variables** for your pro
 | `MCP_AUTH_TOKEN` | Any secure random string | Required when `MCP_AUTH_ENABLED=true`. Clients send as `Authorization: Bearer <token>`. |
 | `NEXT_PUBLIC_AGENT_PORT` | `9334` | Only relevant for local dev (WebSocket agent). Not used in production (SSE transport). Can be omitted. |
 | `ALLOWED_EMAIL_DOMAIN` | `devobsessed.com` | Email domain restriction for sign-in. Default: `devobsessed.com`. |
+| `ENABLE_AUTO_FETCH` | `true` | Gates the check-feeds cron. When not `true`, the cron returns immediately without querying the database or dispatching workflows. Leave unset to disable auto-fetch. |
 
 > **Note:** Do NOT set `PORT` or `AGENT_PORT` -- these are local dev settings. Vercel manages ports automatically.
 

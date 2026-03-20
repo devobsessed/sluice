@@ -80,6 +80,8 @@ Dispatch point: [`src/app/api/videos/route.ts`](../src/app/api/videos/route.ts) 
 
 Source: [`src/workflows/rss-feed.ts`](../src/workflows/rss-feed.ts)
 
+> **Feature flag:** The `check-feeds` cron endpoint is gated by the `ENABLE_AUTO_FETCH` environment variable. Set `ENABLE_AUTO_FETCH=true` in your Vercel project settings to enable RSS feed polling. When unset, the cron returns immediately without querying the database or dispatching workflows.
+
 Triggered by the `check-feeds` cron job when RSS delta detection discovers a new video from a followed channel. Three sequential steps:
 
 1. **`fetchTranscriptStep(videoId, youtubeId)`** -- Fetch the transcript from YouTube and store it on the video record
@@ -111,6 +113,8 @@ The processor functions are the single source of truth for what each pipeline st
 ## Dispatch
 
 Both dispatch points follow the same fire-and-forget pattern: call `start()`, log failures, never fail the HTTP response.
+
+> **Note:** The check-feeds cron dispatch is gated by `ENABLE_AUTO_FETCH=true`. When the flag is not set, the endpoint short-circuits before reaching the dispatch code below.
 
 From [`src/app/api/videos/route.ts`](../src/app/api/videos/route.ts) lines 240-266:
 
