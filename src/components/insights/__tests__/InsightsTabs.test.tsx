@@ -219,18 +219,29 @@ describe('InsightsTabs', () => {
   });
 
   it('threads video.createdAt to InsightsPanel as videoCreatedAt', () => {
-    const onSeek = vi.fn();
-    // Without NEXT_PUBLIC_VERCEL set, the local empty state renders regardless of createdAt.
-    // We verify the panel renders the empty state (proving InsightsTabs didn't crash when
-    // threading createdAt, and that the prop flows through without error).
-    render(
-      <Wrapper>
-        <InsightsTabs video={mockVideo} onSeek={onSeek} />
-      </Wrapper>
-    );
+    const originalEnv = process.env.NEXT_PUBLIC_VERCEL;
+    process.env.NEXT_PUBLIC_VERCEL = '1';
+    try {
+      const onSeek = vi.fn();
+      const recentVideo = {
+        ...mockVideo,
+        createdAt: new Date(Date.now() - 2 * 60 * 1000), // 2 min ago
+      };
+      render(
+        <Wrapper>
+          <InsightsTabs video={recentVideo} onSeek={onSeek} />
+        </Wrapper>
+      );
 
-    // InsightsPanel is on the Insights tab (default). Without a VERCEL env var the local
-    // empty state is shown regardless of createdAt, confirming prop threading works.
-    expect(screen.getByText('No insights generated yet')).toBeInTheDocument();
+      // With NEXT_PUBLIC_VERCEL set and a recent createdAt, the generating state
+      // renders - proving createdAt was threaded through to InsightsPanel.
+      expect(screen.getByText('Insights are on their way')).toBeInTheDocument();
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.NEXT_PUBLIC_VERCEL;
+      } else {
+        process.env.NEXT_PUBLIC_VERCEL = originalEnv;
+      }
+    }
   });
 });

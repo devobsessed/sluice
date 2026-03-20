@@ -43,7 +43,7 @@ export async function setupTestDb() {
         END IF;
       END LOOP;
       IF array_length(existing, 1) > 0 THEN
-        EXECUTE 'TRUNCATE ' || (SELECT string_agg(quote_ident(t), ', ') FROM unnest(existing) AS t) || ' CASCADE';
+        EXECUTE 'TRUNCATE ' || (SELECT string_agg(format('%I.%I', 'public', t), ', ') FROM unnest(existing) AS t) || ' CASCADE';
       END IF;
     END $$
   `)

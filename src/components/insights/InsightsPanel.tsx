@@ -2,6 +2,7 @@
 
 import { Sparkles, FileText, Lightbulb, CheckSquare, AlertCircle, X, WifiOff, Loader2, Brain } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { InsightSection } from './InsightSection';
 import { ClaudeCodeSection } from './ClaudeCodeSection';
 import type { ExtractionResult } from '@/lib/claude/prompts/types';
@@ -99,7 +100,7 @@ export function InsightsPanel({
 
     if (variant === 'generating') {
       return (
-        <div className={`transition-opacity duration-300 ${className ?? ''}`}>
+        <div className={cn('transition-opacity duration-300', className)}>
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <Sparkles className="mb-4 h-12 w-12 text-muted-foreground animate-breathe" />
             <h3 className="mb-2 text-lg font-medium">Insights are on their way</h3>
@@ -118,7 +119,7 @@ export function InsightsPanel({
 
     if (variant === 'timeout') {
       return (
-        <div className={`transition-opacity duration-300 ${className ?? ''}`}>
+        <div className={cn('transition-opacity duration-300', className)}>
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <AlertCircle className="mb-4 h-12 w-12 text-muted-foreground" />
             <h3 className="mb-2 text-lg font-medium">Insights didn&apos;t arrive as expected</h3>
