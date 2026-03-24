@@ -5,12 +5,16 @@ type ChannelStatus = {
   channelName: string | null
   transcriptCount: number
   personaId: number | null
-  personaCreatedAt: Date | null
+  personaCreatedAt: string | null
+  personaName: string | null
+  expertiseTopics: unknown
 }
 
 // Mock db query results
-let mockQueryResults: ChannelStatus[] = []
+let mockChannelCountResults: { channelName: string | null; transcriptCount: number }[] = []
+let mockPersonaResults: { id: number; channelName: string; createdAt: Date | null; name: string; expertiseTopics: unknown }[] = []
 let mockShouldThrow = false
+let selectCallIndex = 0
 
 vi.mock('@/lib/auth-guards', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/auth-guards')>()
@@ -29,14 +33,21 @@ vi.mock('@/lib/db', async () => {
         if (mockShouldThrow) {
           throw new Error('Database connection failed')
         }
-        return {
-          from: vi.fn().mockReturnValue({
-            leftJoin: vi.fn().mockReturnValue({
+        const idx = selectCallIndex++
+        if (idx === 0) {
+          // First call: channel counts query
+          return {
+            from: vi.fn().mockReturnValue({
               where: vi.fn().mockReturnValue({
-                groupBy: vi.fn().mockImplementation(() => Promise.resolve(mockQueryResults)),
+                groupBy: vi.fn().mockImplementation(() => Promise.resolve(mockChannelCountResults)),
               }),
             }),
-          }),
+          }
+        } else {
+          // Second call: personas query
+          return {
+            from: vi.fn().mockResolvedValue(mockPersonaResults),
+          }
         }
       }),
     },
@@ -54,8 +65,10 @@ const { GET } = await import('../route')
 describe('GET /api/personas/status', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockQueryResults = []
+    mockChannelCountResults = []
+    mockPersonaResults = []
     mockShouldThrow = false
+    selectCallIndex = 0
   })
 
   it('returns empty channels array when no videos exist', async () => {
@@ -68,10 +81,11 @@ describe('GET /api/personas/status', () => {
   })
 
   it('returns channels with transcript counts and no personas', async () => {
-    mockQueryResults = [
-      { channelName: 'Nate B Jones', transcriptCount: 6, personaId: null, personaCreatedAt: null },
-      { channelName: 'Anthropic', transcriptCount: 1, personaId: null, personaCreatedAt: null },
+    mockChannelCountResults = [
+      { channelName: 'Nate B Jones', transcriptCount: 6 },
+      { channelName: 'Anthropic', transcriptCount: 1 },
     ]
+    // mockPersonaResults stays empty (no personas)
 
     const response = await GET()
     const data = await response.json()
@@ -80,7 +94,6 @@ describe('GET /api/personas/status', () => {
     expect(data.channels).toHaveLength(2)
     expect(data.threshold).toBe(5)
 
-    // Should be sorted by transcript count descending (no personas)
     expect(data.channels[0]).toMatchObject({
       channelName: 'Nate B Jones',
       transcriptCount: 6,
@@ -97,9 +110,12 @@ describe('GET /api/personas/status', () => {
 
   it('returns channels with personas included', async () => {
     const personaCreatedAt = new Date('2024-02-10T10:00:00Z')
-    mockQueryResults = [
-      { channelName: 'Nate B Jones', transcriptCount: 3, personaId: 1, personaCreatedAt },
-      { channelName: 'Anthropic', transcriptCount: 1, personaId: null, personaCreatedAt: null },
+    mockChannelCountResults = [
+      { channelName: 'Nate B Jones', transcriptCount: 3 },
+      { channelName: 'Anthropic', transcriptCount: 1 },
+    ]
+    mockPersonaResults = [
+      { id: 1, channelName: 'Nate B Jones', createdAt: personaCreatedAt, name: 'Nate', expertiseTopics: null },
     ]
 
     const response = await GET()
@@ -125,10 +141,13 @@ describe('GET /api/personas/status', () => {
   })
 
   it('sorts active personas first, then by transcript count descending', async () => {
-    mockQueryResults = [
-      { channelName: 'Channel A', transcriptCount: 2, personaId: 1, personaCreatedAt: new Date() },
-      { channelName: 'Channel B', transcriptCount: 5, personaId: null, personaCreatedAt: null },
-      { channelName: 'Channel C', transcriptCount: 3, personaId: null, personaCreatedAt: null },
+    mockChannelCountResults = [
+      { channelName: 'Channel A', transcriptCount: 2 },
+      { channelName: 'Channel B', transcriptCount: 5 },
+      { channelName: 'Channel C', transcriptCount: 3 },
+    ]
+    mockPersonaResults = [
+      { id: 1, channelName: 'Channel A', createdAt: new Date(), name: 'Persona A', expertiseTopics: null },
     ]
 
     const response = await GET()
@@ -149,10 +168,10 @@ describe('GET /api/personas/status', () => {
   })
 
   it('handles channels below and above threshold', async () => {
-    mockQueryResults = [
-      { channelName: 'Above Threshold', transcriptCount: 6, personaId: null, personaCreatedAt: null },
-      { channelName: 'At Threshold', transcriptCount: 5, personaId: null, personaCreatedAt: null },
-      { channelName: 'Below Threshold', transcriptCount: 3, personaId: null, personaCreatedAt: null },
+    mockChannelCountResults = [
+      { channelName: 'Above Threshold', transcriptCount: 6 },
+      { channelName: 'At Threshold', transcriptCount: 5 },
+      { channelName: 'Below Threshold', transcriptCount: 3 },
     ]
 
     const response = await GET()

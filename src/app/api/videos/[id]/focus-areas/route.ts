@@ -23,7 +23,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
 
     // Check if video exists
-    const [video] = await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
+    const [video] = await db.select({ id: videos.id }).from(videos).where(eq(videos.id, videoId)).limit(1)
 
     if (!video) {
       timer.end(404)
@@ -83,7 +83,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const { focusAreaId } = validationResult.data
 
     // Check if video exists
-    const [video] = await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
+    const [video] = await db.select({ id: videos.id }).from(videos).where(eq(videos.id, videoId)).limit(1)
 
     if (!video) {
       timer.end(404)
@@ -172,7 +172,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     }
 
     // Check if video exists
-    const [video] = await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
+    const [video] = await db.select({ id: videos.id }).from(videos).where(eq(videos.id, videoId)).limit(1)
 
     if (!video) {
       timer.end(404)

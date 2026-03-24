@@ -179,7 +179,7 @@ export async function POST(request: Request) {
     // Check for duplicate only for YouTube videos
     if (sourceType === 'youtube' && youtubeId) {
       const existingVideo = await db
-        .select()
+        .select({ id: videos.id })
         .from(videos)
         .where(eq(videos.youtubeId, youtubeId))
         .limit(1);
