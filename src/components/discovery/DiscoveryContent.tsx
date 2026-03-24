@@ -45,10 +45,56 @@ export function DiscoveryContent() {
   const [error, setError] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
+  // Fetch all discovery data in a single call
+  const fetchDiscoveryData = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const response = await fetch('/api/discovery')
+      if (!response.ok) {
+        const data = await response.json()
+        setError(data.error || 'Failed to load discovery data')
+        return
+      }
+
+      const data = await response.json()
+      setChannels(data.channels)
+
+      const fetchedVideos: DiscoveryVideoWithBank[] = data.videos
+      setDiscoveryVideos(fetchedVideos)
+
+      // Build maps from the single response
+      const newBankIdMap: Record<string, number> = {}
+      const newFocusAreaMap: Record<string, { id: number; name: string; color: string }[]> = {}
+
+      for (const video of fetchedVideos) {
+        if (video.bankVideoId !== null && video.bankVideoId !== undefined) {
+          newBankIdMap[video.youtubeId] = video.bankVideoId
+        }
+        if (video.focusAreas && video.focusAreas.length > 0) {
+          newFocusAreaMap[video.youtubeId] = video.focusAreas.map(
+            (fa: { id: number; name: string; color: string | null }) => ({
+              id: fa.id,
+              name: fa.name,
+              color: fa.color ?? '',
+            })
+          )
+        }
+      }
+
+      setBankIdMap(newBankIdMap)
+      setFocusAreaMap(newFocusAreaMap)
+    } catch {
+      setError('Failed to load discovery data')
+    } finally {
+      setIsLoading(false)
+      setIsLoadingVideos(false)
+    }
+  }, [])
+
   // Batch add hook
   const { startBatch, batchStatus, isRunning } = useBatchAdd({
     onComplete: () => {
-      fetchVideos()
+      fetchDiscoveryData()
       setSelectedIds(new Set())
     },
   })
@@ -73,89 +119,20 @@ export function DiscoveryContent() {
     setPageTitle({ title: 'Discovery' })
   }, [setPageTitle])
 
-  // Fetch videos — single API call returns bankVideoId and focusAreas for in-bank videos
-  const fetchVideos = useCallback(async () => {
-    setIsLoadingVideos(true)
-    try {
-      const response = await fetch('/api/channels/videos')
-
-      if (!response.ok) {
-        console.error('Failed to fetch discovery videos')
-        setDiscoveryVideos([])
-        setFocusAreaMap({})
-        setBankIdMap({})
-        return
-      }
-
-      const videos: DiscoveryVideoWithBank[] = await response.json()
-      setDiscoveryVideos(videos)
-
-      // Build maps from the single response — no second API call needed
-      const newBankIdMap: Record<string, number> = {}
-      const newFocusAreaMap: Record<string, { id: number; name: string; color: string }[]> = {}
-
-      for (const video of videos) {
-        if (video.bankVideoId !== null && video.bankVideoId !== undefined) {
-          newBankIdMap[video.youtubeId] = video.bankVideoId
-        }
-        if (video.focusAreas && video.focusAreas.length > 0) {
-          newFocusAreaMap[video.youtubeId] = video.focusAreas.map((fa) => ({
-            id: fa.id,
-            name: fa.name,
-            color: fa.color ?? '',
-          }))
-        }
-      }
-
-      setBankIdMap(newBankIdMap)
-      setFocusAreaMap(newFocusAreaMap)
-    } catch (err) {
-      console.error('Failed to fetch videos:', err)
-      setDiscoveryVideos([])
-      setFocusAreaMap({})
-      setBankIdMap({})
-    } finally {
-      setIsLoadingVideos(false)
-    }
-  }, [])
-
-  // Initial load: fetch channels
+  // Initial load: fetch all discovery data in one request
   useEffect(() => {
-    const fetchChannels = async () => {
-      try {
-        const response = await fetch('/api/channels')
-        const data = await response.json()
-
-        if (!response.ok) {
-          setError(data.error || 'Failed to load channels')
-          return
-        }
-
-        setChannels(data)
-
-        // If channels exist, fetch videos
-        if (Array.isArray(data) && data.length > 0) {
-          await fetchVideos()
-        }
-      } catch {
-        setError('Failed to load channels')
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
-    fetchChannels()
-  }, [fetchVideos])
+    fetchDiscoveryData()
+  }, [fetchDiscoveryData])
 
   const handleChannelFollowed = async (newChannel: Channel) => {
     setChannels((prev) => [newChannel, ...prev])
-    // Refresh RSS cache then re-fetch cached data so new channel videos appear immediately
+    // Refresh RSS cache then re-fetch all discovery data so new channel videos appear immediately
     try {
       await fetch('/api/channels/videos/refresh', { method: 'POST' })
     } catch {
       // Non-fatal: cached data will still load
     }
-    await fetchVideos()
+    await fetchDiscoveryData()
   }
 
   const handleRefresh = async () => {
@@ -166,7 +143,7 @@ export function DiscoveryContent() {
     } catch {
       // Non-fatal: will still reload whatever is cached
     }
-    await fetchVideos()
+    await fetchDiscoveryData()
   }
 
   const handleToggleSelect = useCallback((youtubeId: string) => {
