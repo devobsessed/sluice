@@ -638,10 +638,18 @@ describe('POST /api/videos', () => {
   })
 })
 
+// Helper to build the PaginatedResult shape the mock must return
+function makePaginatedResult<T>(
+  items: T[],
+  { hasMore = false, nextCursor = null }: { hasMore?: boolean; nextCursor?: string | null } = {},
+) {
+  return { items, hasMore, nextCursor }
+}
+
 describe('GET /api/videos', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockSearchVideos.mockResolvedValue([])
+    mockSearchVideos.mockResolvedValue(makePaginatedResult([]))
     mockGetVideoStats.mockResolvedValue({ count: 0, channels: 0 })
     mockGetDistinctChannels.mockResolvedValue([])
 
@@ -665,7 +673,7 @@ describe('GET /api/videos', () => {
 
   it('returns videos with all fields including publishedAt', async () => {
     const publishedDate = new Date('2024-03-10T08:00:00Z')
-    mockSearchVideos.mockResolvedValue([
+    mockSearchVideos.mockResolvedValue(makePaginatedResult([
       {
         id: 1,
         youtubeId: 'test-full-fields',
@@ -678,7 +686,7 @@ describe('GET /api/videos', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       },
-    ])
+    ]))
 
     const request = new Request('http://localhost:3000/api/videos')
     const response = await GET(request)
@@ -704,12 +712,11 @@ describe('GET /api/videos', () => {
     expect(data.error).toBeDefined()
   })
 
-  it('filters videos by channel when channel param is provided', async () => {
-    mockSearchVideos.mockResolvedValue([
+  it('passes channel param to searchVideos and returns filtered results', async () => {
+    mockSearchVideos.mockResolvedValue(makePaginatedResult([
       { id: 1, youtubeId: 'fireship-1', title: 'React in 100 Seconds', channel: 'Fireship' },
       { id: 2, youtubeId: 'fireship-2', title: 'TypeScript in 100 Seconds', channel: 'Fireship' },
-      { id: 3, youtubeId: 'theo-1', title: 'Why I use TypeScript', channel: 'Theo' },
-    ])
+    ]))
 
     const request = new Request('http://localhost:3000/api/videos?channel=Fireship')
     const response = await GET(request)
@@ -718,13 +725,17 @@ describe('GET /api/videos', () => {
     expect(response.status).toBe(200)
     expect(data.videos).toHaveLength(2)
     expect(data.videos.every((v: { channel: string }) => v.channel === 'Fireship')).toBe(true)
+    expect(mockSearchVideos).toHaveBeenCalledWith(
+      '',
+      expect.objectContaining({ channel: 'Fireship' }),
+    )
   })
 
   it('returns all videos when channel param is not provided', async () => {
-    mockSearchVideos.mockResolvedValue([
+    mockSearchVideos.mockResolvedValue(makePaginatedResult([
       { id: 1, youtubeId: 'channel-a-1', title: 'Video A1', channel: 'Channel A' },
       { id: 2, youtubeId: 'channel-b-1', title: 'Video B1', channel: 'Channel B' },
-    ])
+    ]))
 
     const request = new Request('http://localhost:3000/api/videos')
     const response = await GET(request)
@@ -734,10 +745,8 @@ describe('GET /api/videos', () => {
     expect(data.videos).toHaveLength(2)
   })
 
-  it('returns empty list when channel param matches no videos', async () => {
-    mockSearchVideos.mockResolvedValue([
-      { id: 1, youtubeId: 'some-video', title: 'Some Video', channel: 'Known Channel' },
-    ])
+  it('returns empty list when searchVideos returns no items for channel', async () => {
+    mockSearchVideos.mockResolvedValue(makePaginatedResult([]))
 
     const request = new Request('http://localhost:3000/api/videos?channel=NonExistentChannel')
     const response = await GET(request)
@@ -747,17 +756,21 @@ describe('GET /api/videos', () => {
     expect(data.videos).toEqual([])
   })
 
-  it('channel filter is case-sensitive exact match', async () => {
-    mockSearchVideos.mockResolvedValue([
-      { id: 1, youtubeId: 'fireship-exact', title: 'Exact Case Video', channel: 'Fireship' },
-    ])
+  it('passes focusAreaId to searchVideos options', async () => {
+    mockSearchVideos.mockResolvedValue(makePaginatedResult([
+      { id: 5, youtubeId: 'fa-video', title: 'Focus Area Video', channel: 'Some Channel' },
+    ]))
 
-    const request = new Request('http://localhost:3000/api/videos?channel=fireship')
+    const request = new Request('http://localhost:3000/api/videos?focusAreaId=3')
     const response = await GET(request)
     const data = await response.json()
 
     expect(response.status).toBe(200)
-    expect(data.videos).toEqual([])
+    expect(data.videos).toHaveLength(1)
+    expect(mockSearchVideos).toHaveBeenCalledWith(
+      '',
+      expect.objectContaining({ focusAreaId: 3 }),
+    )
   })
 
   it('returns summaryMap field in GET response', async () => {
@@ -770,7 +783,81 @@ describe('GET /api/videos', () => {
     expect(typeof data.summaryMap).toBe('object')
   })
 
-  it('existing response fields (videos, stats, focusAreaMap) still present alongside summaryMap', async () => {
+  it('response includes nextCursor and hasMore pagination fields', async () => {
+    const cursor = Buffer.from(JSON.stringify({ createdAt: '2024-01-01T00:00:00.000Z', id: 24 })).toString('base64url')
+    mockSearchVideos.mockResolvedValue(makePaginatedResult(
+      [{ id: 1, youtubeId: 'v1', title: 'Video 1', channel: 'Chan' }],
+      { hasMore: true, nextCursor: cursor },
+    ))
+
+    const request = new Request('http://localhost:3000/api/videos')
+    const response = await GET(request)
+    const data = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(data).toHaveProperty('nextCursor', cursor)
+    expect(data).toHaveProperty('hasMore', true)
+  })
+
+  it('passes cursor and limit params to searchVideos', async () => {
+    const cursorStr = Buffer.from(JSON.stringify({ createdAt: '2024-01-01T00:00:00.000Z', id: 24 })).toString('base64url')
+    mockSearchVideos.mockResolvedValue(makePaginatedResult([]))
+
+    const request = new Request(`http://localhost:3000/api/videos?cursor=${cursorStr}&limit=12`)
+    const response = await GET(request)
+    const data = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(mockSearchVideos).toHaveBeenCalledWith(
+      '',
+      expect.objectContaining({ cursor: cursorStr, limit: 12 }),
+    )
+    // stats are null on subsequent pages
+    expect(data.stats).toBeNull()
+  })
+
+  it('fetches stats on first page (no cursor) but skips on subsequent pages', async () => {
+    const cursorStr = Buffer.from(JSON.stringify({ createdAt: '2024-01-01T00:00:00.000Z', id: 24 })).toString('base64url')
+    mockGetVideoStats.mockResolvedValue({ count: 10, channels: 3 })
+
+    // First page - no cursor
+    const firstPage = new Request('http://localhost:3000/api/videos')
+    const firstResponse = await GET(firstPage)
+    const firstData = await firstResponse.json()
+    expect(firstData.stats).not.toBeNull()
+    expect(mockGetVideoStats).toHaveBeenCalledTimes(1)
+
+    vi.clearAllMocks()
+    mockSearchVideos.mockResolvedValue(makePaginatedResult([]))
+    mockGetVideoStats.mockResolvedValue({ count: 10, channels: 3 })
+
+    // Second page - with cursor
+    const secondPage = new Request(`http://localhost:3000/api/videos?cursor=${cursorStr}`)
+    const secondResponse = await GET(secondPage)
+    const secondData = await secondResponse.json()
+    expect(secondData.stats).toBeNull()
+    expect(mockGetVideoStats).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 for invalid limit param', async () => {
+    const request = new Request('http://localhost:3000/api/videos?limit=notanumber')
+    const response = await GET(request)
+    const data = await response.json()
+
+    expect(response.status).toBe(400)
+    expect(data.error).toBeDefined()
+  })
+
+  it('returns 400 for limit below 1', async () => {
+    const request = new Request('http://localhost:3000/api/videos?limit=0')
+    const response = await GET(request)
+    const data = await response.json()
+
+    expect(response.status).toBe(400)
+    expect(data.error).toBeDefined()
+  })
+
+  it('existing response fields (videos, stats, focusAreaMap, summaryMap) all present on first page', async () => {
     const request = new Request('http://localhost:3000/api/videos')
     const response = await GET(request)
     const data = await response.json()
@@ -780,5 +867,7 @@ describe('GET /api/videos', () => {
     expect(data).toHaveProperty('stats')
     expect(data).toHaveProperty('focusAreaMap')
     expect(data).toHaveProperty('summaryMap')
+    expect(data).toHaveProperty('nextCursor')
+    expect(data).toHaveProperty('hasMore')
   })
 })
