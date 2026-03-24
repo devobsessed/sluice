@@ -36,4 +36,4 @@ export { pool };
 export * from './schema'
 
 // Re-export search functions
-export { searchVideos, getVideoStats, getDistinctChannels, type VideoListItem } from './search'
+export { searchVideos, getVideoStats, getDistinctChannels, DEFAULT_PAGE_SIZE, type VideoListItem, type PaginatedResult, type PaginationCursor } from './search'
