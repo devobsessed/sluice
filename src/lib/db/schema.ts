@@ -19,6 +19,8 @@ export const videos = pgTable('videos', {
   publishedAt: timestamp('published_at'), // nullable for existing videos
 }, (table) => ({
   youtubeIdUnique: uniqueIndex('youtube_id_unique').on(table.youtubeId).where(sql`${table.youtubeId} IS NOT NULL`),
+  channelIdx: index('videos_channel_idx').on(table.channel),
+  createdAtIdx: index('videos_created_at_idx').on(table.createdAt),
 }));
 
 /**
@@ -96,7 +98,9 @@ export const chunks = pgTable('chunks', {
   // NULL until populated by embedding pipeline
   embedding: vector('embedding', { dimensions: 384 }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-});
+}, (table) => ({
+  videoIdIdx: index('chunks_video_id_idx').on(table.videoId),
+}));
 
 /**
  * Relationships table for Graph RAG
