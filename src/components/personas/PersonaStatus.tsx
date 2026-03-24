@@ -3,28 +3,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Loader2, MessageCircle } from 'lucide-react'
+import { usePersonaStatus } from '@/components/providers/PersonaStatusProvider'
+import type { PersonaChannel } from '@/components/providers/PersonaStatusProvider'
 
 const MAX_VISIBLE = 5
 
-interface Channel {
-  channelName: string
-  transcriptCount: number
-  personaId: number | null
-  personaCreatedAt: Date | null
-  personaName: string | null
-  expertiseTopics: string[] | null
-}
-
-interface StatusResponse {
-  channels: Channel[]
-  threshold: number
-}
-
-interface PersonaStatusProps {
-  onActivePersonasChange?: (hasActive: boolean) => void
-}
-
-function sortChannels(channels: Channel[], threshold: number): Channel[] {
+function sortChannels(channels: PersonaChannel[], threshold: number) {
   return [...channels].sort((a, b) => {
     const aIsActive = a.personaId !== null
     const bIsActive = b.personaId !== null
@@ -69,41 +53,23 @@ export function PersonaStatusSkeleton() {
   )
 }
 
+interface PersonaStatusProps {
+  onActivePersonasChange?: (hasActive: boolean) => void
+}
+
 export function PersonaStatus({ onActivePersonasChange }: PersonaStatusProps) {
-  const [channels, setChannels] = useState<Channel[]>([])
-  const [threshold, setThreshold] = useState(5)
-  const [isLoading, setIsLoading] = useState(true)
+  const { channels, threshold, isLoading, updateChannel } = usePersonaStatus()
   const [creating, setCreating] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
 
+  // Notify parent about active personas whenever channels data changes
   useEffect(() => {
-    async function fetchStatus() {
-      try {
-        const response = await fetch('/api/personas/status')
-        if (!response.ok) return
-        const data: StatusResponse = await response.json()
-        setChannels(data.channels)
-        setThreshold(data.threshold)
-
-        // Notify parent about active personas
-        const hasActive = data.channels.some(c => c.personaId !== null)
-        onActivePersonasChange?.(hasActive)
-      } catch {
-        // Silently fail — status is non-critical
-      } finally {
-        setIsLoading(false)
-      }
+    if (!isLoading && channels.length > 0) {
+      const hasActive = channels.some(c => c.personaId !== null)
+      onActivePersonasChange?.(hasActive)
     }
-    // Defer persona status fetch — not needed for initial page render.
-    // The skeleton loader displays during the delay, which is the same
-    // UX as waiting for the API response.
-    const timer = setTimeout(fetchStatus, 2000)
-
-    return () => {
-      clearTimeout(timer)
-    }
-  }, [onActivePersonasChange])
+  }, [channels, isLoading, onActivePersonasChange])
 
   const handleCreate = useCallback(async (channelName: string) => {
     setCreating(channelName)
@@ -120,14 +86,11 @@ export function PersonaStatus({ onActivePersonasChange }: PersonaStatusProps) {
       }
       const result = await response.json()
 
-      // Update channel to active state
-      setChannels(prev =>
-        prev.map(c =>
-          c.channelName === channelName
-            ? { ...c, personaId: result.personaId, personaCreatedAt: new Date() }
-            : c
-        )
-      )
+      // Update shared provider state so ChatHubDrawer also sees the new persona
+      updateChannel(channelName, {
+        personaId: result.personaId,
+        personaCreatedAt: new Date().toISOString(),
+      })
 
       // Notify parent that we now have an active persona
       onActivePersonasChange?.(true)
@@ -136,7 +99,7 @@ export function PersonaStatus({ onActivePersonasChange }: PersonaStatusProps) {
     } finally {
       setCreating(null)
     }
-  }, [onActivePersonasChange])
+  }, [onActivePersonasChange, updateChannel])
 
   // Loading state
   if (isLoading) {

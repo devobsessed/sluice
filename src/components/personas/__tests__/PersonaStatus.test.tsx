@@ -1,9 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 import { PersonaStatus, PersonaStatusSkeleton } from '../PersonaStatus'
+import { PersonaStatusProvider } from '@/components/providers/PersonaStatusProvider'
 
 // Mock fetch globally
 global.fetch = vi.fn()
+
+function Wrapper({ children }: { children: React.ReactNode }) {
+  return <PersonaStatusProvider>{children}</PersonaStatusProvider>
+}
 
 describe('PersonaStatus', () => {
   beforeEach(() => {
@@ -15,17 +20,17 @@ describe('PersonaStatus', () => {
     vi.useRealTimers()
   })
 
-  // Helper to advance the 2-second defer and drain all async microtasks
+  // Helper to advance the 1.5-second provider defer and drain all async microtasks
   async function advanceDefer() {
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(2000)
+      await vi.advanceTimersByTimeAsync(1500)
     })
   }
 
   it('renders loading state on initial mount', () => {
     vi.mocked(fetch).mockImplementation(() => new Promise(() => {})) // Never resolves
 
-    render(<PersonaStatus />)
+    render(<PersonaStatus />, { wrapper: Wrapper })
 
     // Should show skeleton with pill placeholders (fetch not yet fired — deferred)
     expect(screen.getByTestId('persona-status-skeleton')).toBeInTheDocument()
@@ -37,7 +42,7 @@ describe('PersonaStatus', () => {
       json: async () => ({ channels: [], threshold: 5 }),
     } as Response)
 
-    const { container } = render(<PersonaStatus />)
+    const { container } = render(<PersonaStatus />, { wrapper: Wrapper })
 
     // Before defer: skeleton shows
     expect(screen.getByTestId('persona-status-skeleton')).toBeInTheDocument()
@@ -61,7 +66,7 @@ describe('PersonaStatus', () => {
       }),
     } as Response)
 
-    render(<PersonaStatus />)
+    render(<PersonaStatus />, { wrapper: Wrapper })
 
     await advanceDefer()
 
@@ -82,7 +87,7 @@ describe('PersonaStatus', () => {
       }),
     } as Response)
 
-    render(<PersonaStatus />)
+    render(<PersonaStatus />, { wrapper: Wrapper })
 
     await advanceDefer()
 
@@ -102,7 +107,7 @@ describe('PersonaStatus', () => {
       }),
     } as Response)
 
-    render(<PersonaStatus />)
+    render(<PersonaStatus />, { wrapper: Wrapper })
 
     await advanceDefer()
 
@@ -124,7 +129,7 @@ describe('PersonaStatus', () => {
       }),
     } as Response)
 
-    render(<PersonaStatus />)
+    render(<PersonaStatus />, { wrapper: Wrapper })
 
     await advanceDefer()
 
@@ -150,7 +155,7 @@ describe('PersonaStatus', () => {
       }),
     } as Response)
 
-    render(<PersonaStatus />)
+    render(<PersonaStatus />, { wrapper: Wrapper })
 
     await advanceDefer()
 
@@ -183,7 +188,7 @@ describe('PersonaStatus', () => {
         json: async () => ({ success: true }),
       } as Response)
 
-    render(<PersonaStatus />)
+    render(<PersonaStatus />, { wrapper: Wrapper })
 
     await advanceDefer()
 
@@ -217,7 +222,7 @@ describe('PersonaStatus', () => {
         json: async () => ({ personaId: 42 }),
       } as Response)
 
-    render(<PersonaStatus />)
+    render(<PersonaStatus />, { wrapper: Wrapper })
 
     await advanceDefer()
 
@@ -248,7 +253,7 @@ describe('PersonaStatus', () => {
       } as Response)
       .mockImplementationOnce(() => new Promise(() => {})) // Never resolves
 
-    render(<PersonaStatus />)
+    render(<PersonaStatus />, { wrapper: Wrapper })
 
     await advanceDefer()
 
@@ -279,7 +284,7 @@ describe('PersonaStatus', () => {
         json: async () => ({ error: 'Failed to create persona' }),
       } as Response)
 
-    render(<PersonaStatus />)
+    render(<PersonaStatus />, { wrapper: Wrapper })
 
     await advanceDefer()
 
@@ -307,7 +312,7 @@ describe('PersonaStatus', () => {
       }),
     } as Response)
 
-    render(<PersonaStatus onActivePersonasChange={onActivePersonasChange} />)
+    render(<PersonaStatus onActivePersonasChange={onActivePersonasChange} />, { wrapper: Wrapper })
 
     await advanceDefer()
 
@@ -327,7 +332,7 @@ describe('PersonaStatus', () => {
       }),
     } as Response)
 
-    render(<PersonaStatus onActivePersonasChange={onActivePersonasChange} />)
+    render(<PersonaStatus onActivePersonasChange={onActivePersonasChange} />, { wrapper: Wrapper })
 
     await advanceDefer()
 
@@ -351,7 +356,7 @@ describe('PersonaStatus', () => {
       }),
     } as Response)
 
-    render(<PersonaStatus />)
+    render(<PersonaStatus />, { wrapper: Wrapper })
 
     await advanceDefer()
 
@@ -383,7 +388,7 @@ describe('PersonaStatus', () => {
       }),
     } as Response)
 
-    render(<PersonaStatus />)
+    render(<PersonaStatus />, { wrapper: Wrapper })
 
     await advanceDefer()
 
@@ -403,7 +408,7 @@ describe('PersonaStatus', () => {
       }),
     } as Response)
 
-    render(<PersonaStatus />)
+    render(<PersonaStatus />, { wrapper: Wrapper })
 
     await advanceDefer()
 
@@ -428,7 +433,7 @@ describe('PersonaStatus', () => {
       }),
     } as Response)
 
-    render(<PersonaStatus />)
+    render(<PersonaStatus />, { wrapper: Wrapper })
 
     await advanceDefer()
 
@@ -461,7 +466,7 @@ describe('PersonaStatus', () => {
       }),
     } as Response)
 
-    render(<PersonaStatus />)
+    render(<PersonaStatus />, { wrapper: Wrapper })
 
     await advanceDefer()
 
@@ -506,7 +511,7 @@ describe('PersonaStatus', () => {
       }),
     } as Response)
 
-    render(<PersonaStatus />)
+    render(<PersonaStatus />, { wrapper: Wrapper })
 
     await advanceDefer()
 
@@ -542,7 +547,7 @@ describe('PersonaStatus', () => {
       }),
     } as Response)
 
-    render(<PersonaStatus />)
+    render(<PersonaStatus />, { wrapper: Wrapper })
 
     await advanceDefer()
 
@@ -610,7 +615,7 @@ describe('PersonaStatus', () => {
         }),
       } as Response)
 
-      render(<PersonaStatus />)
+      render(<PersonaStatus />, { wrapper: Wrapper })
 
       await advanceDefer()
 
@@ -637,7 +642,7 @@ describe('PersonaStatus', () => {
         }),
       } as Response)
 
-      render(<PersonaStatus />)
+      render(<PersonaStatus />, { wrapper: Wrapper })
 
       await advanceDefer()
 
@@ -662,7 +667,7 @@ describe('PersonaStatus', () => {
         }),
       } as Response)
 
-      render(<PersonaStatus />)
+      render(<PersonaStatus />, { wrapper: Wrapper })
 
       await advanceDefer()
 
@@ -683,7 +688,7 @@ describe('PersonaStatus', () => {
         }),
       } as Response)
 
-      const { container } = render(<PersonaStatus />)
+      const { container } = render(<PersonaStatus />, { wrapper: Wrapper })
 
       await advanceDefer()
 
@@ -707,7 +712,7 @@ describe('PersonaStatus', () => {
         }),
       } as Response)
 
-      render(<PersonaStatus />)
+      render(<PersonaStatus />, { wrapper: Wrapper })
 
       await advanceDefer()
 
@@ -731,7 +736,7 @@ describe('PersonaStatus', () => {
         }),
       } as Response)
 
-      render(<PersonaStatus />)
+      render(<PersonaStatus />, { wrapper: Wrapper })
 
       await advanceDefer()
 
@@ -756,7 +761,7 @@ describe('PersonaStatus', () => {
         }),
       } as Response)
 
-      render(<PersonaStatus />)
+      render(<PersonaStatus />, { wrapper: Wrapper })
 
       await advanceDefer()
 
@@ -780,7 +785,7 @@ describe('PersonaStatus', () => {
         }),
       } as Response)
 
-      const { container } = render(<PersonaStatus />)
+      const { container } = render(<PersonaStatus />, { wrapper: Wrapper })
 
       await advanceDefer()
 
@@ -805,7 +810,7 @@ describe('PersonaStatus', () => {
         }),
       } as Response)
 
-      render(<PersonaStatus />)
+      render(<PersonaStatus />, { wrapper: Wrapper })
 
       await advanceDefer()
 
@@ -828,7 +833,7 @@ describe('PersonaStatus', () => {
         }),
       } as Response)
 
-      render(<PersonaStatus />)
+      render(<PersonaStatus />, { wrapper: Wrapper })
 
       await advanceDefer()
 
