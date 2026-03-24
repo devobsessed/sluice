@@ -52,7 +52,7 @@ Vercel Hobby plan limits functions to 10 seconds. These routes will timeout on H
 - [ ] Region: choose closest to your Vercel deployment region (default: `us-east-1`)
 - [ ] Copy the connection string -- it looks like:
   ```
-  postgresql://neondb_owner:PASSWORD@ep-XXXXX.us-east-2.aws.neon.tech/neondb?sslmode=require
+  postgresql://neondb_owner:PASSWORD@ep-XXXXX.us-east-2.aws.neon.tech/neondb?sslmode=verify-full
   ```
 
 ### Enable pgvector Extension
@@ -74,7 +74,7 @@ Sluice uses pgvector for 384-dimensional vector embeddings (all-MiniLM-L6-v2 mod
 
 - [ ] From your local machine, set `DATABASE_URL` to the Neon connection string:
   ```bash
-  DATABASE_URL="postgresql://neondb_owner:PASSWORD@ep-XXXXX.us-east-2.aws.neon.tech/neondb?sslmode=require" npm run db:push
+  DATABASE_URL="postgresql://neondb_owner:PASSWORD@ep-XXXXX.us-east-2.aws.neon.tech/neondb?sslmode=verify-full" npm run db:push
   ```
 - [ ] Drizzle will create all 11 tables: `videos`, `channels`, `insights`, `settings`, `chunks`, `relationships`, `temporal_metadata`, `jobs`, `focus_areas`, `video_focus_areas`, `personas`
 - [ ] Verify with Drizzle Studio or SQL Editor:
@@ -82,7 +82,7 @@ Sluice uses pgvector for 384-dimensional vector embeddings (all-MiniLM-L6-v2 mod
   SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;
   ```
 
-> **Troubleshooting:** If `db:push` fails with SSL errors, ensure your connection string includes `?sslmode=require`. The Sluice DB module auto-detects Neon URLs (checks for `neon.tech` in the connection string) and configures SSL + reduced pool size (3 connections instead of 10).
+> **Troubleshooting:** If `db:push` fails with SSL errors, ensure your connection string includes `?sslmode=verify-full`. The Sluice DB module auto-detects Neon URLs (checks for `neon.tech` in the connection string) and configures SSL + reduced pool size (3 connections instead of 10).
 
 ---
 
@@ -94,7 +94,7 @@ In the Vercel dashboard, go to **Settings > Environment Variables** for your pro
 
 | Variable | Value | Notes |
 |----------|-------|-------|
-| `DATABASE_URL` | `postgresql://...@...neon.tech/...?sslmode=require` | Your Neon connection string from Section 2. Pool auto-sizes to 3 connections for Neon. |
+| `DATABASE_URL` | `postgresql://...@...neon.tech/...?sslmode=verify-full` | Your Neon connection string from Section 2. Pool auto-sizes to 3 connections for Neon. |
 | `AI_GATEWAY_KEY` | `sk-ant-...` | AI gateway key for insights, personas, ensemble queries. Get at [console.anthropic.com](https://console.anthropic.com). |
 | `AGENT_AUTH_TOKEN` | Any secure random string (e.g., `openssl rand -hex 32`) | Authenticates SSE agent transport in production. When this is set, the `/api/agent/token` endpoint returns `transport: 'sse'` instead of `transport: 'websocket'`. |
 | `CRON_SECRET` | Any secure random string (e.g., `openssl rand -hex 32`) | Secures `/api/cron/*` endpoints. Vercel sends this as `Authorization: Bearer <token>` header. |

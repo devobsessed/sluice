@@ -12,7 +12,6 @@ function getPool() {
 
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: isNeon ? { rejectUnauthorized: false } : undefined,
     max: isNeon ? 3 : 10,
     idleTimeoutMillis: isNeon ? 10000 : 30000,
     connectionTimeoutMillis: 5000,
