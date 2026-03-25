@@ -15,7 +15,7 @@ export interface DiscoveryVideo {
   title: string
   channelId: string
   channelName: string
-  publishedAt: string
+  publishedAt: string | null
   description: string
   inBank: boolean
 }
@@ -45,8 +45,8 @@ export function DiscoveryVideoCard({
   batchStatus,
   bankVideoId,
 }: DiscoveryVideoCardProps) {
-  const publishedDate = new Date(video.publishedAt)
-  const relativeTime = formatRelativeTime(publishedDate)
+  const publishedDate = video.publishedAt ? new Date(video.publishedAt) : null
+  const relativeTime = publishedDate ? formatRelativeTime(publishedDate) : null
   const thumbnailUrl = `https://i.ytimg.com/vi/${video.youtubeId}/mqdefault.jpg`
   const addUrl = `/add?url=https://youtube.com/watch?v=${video.youtubeId}${returnTo ? `&returnTo=${returnTo}` : ''}`
 
