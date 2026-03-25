@@ -1,6 +1,6 @@
 import { db, channels, discoveryVideos, videos, videoFocusAreas, focusAreas } from '@/lib/db'
 import { NextResponse } from 'next/server'
-import { desc, inArray, eq } from 'drizzle-orm'
+import { desc, inArray, eq, sql } from 'drizzle-orm'
 import { startApiTimer } from '@/lib/api-timing'
 import { requireSession } from '@/lib/auth-guards'
 
@@ -24,7 +24,7 @@ export async function GET() {
     // Parallel fetch: channels + discovery videos
     const [allChannels, cached] = await Promise.all([
       db.select().from(channels),
-      db.select().from(discoveryVideos).orderBy(desc(discoveryVideos.publishedAt)),
+      db.select().from(discoveryVideos).orderBy(sql`${discoveryVideos.publishedAt} DESC NULLS LAST`),
     ])
 
     // If no cached videos, return channels with empty videos array
