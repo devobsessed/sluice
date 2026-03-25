@@ -12,7 +12,6 @@ function getPool() {
 
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: isNeon ? { rejectUnauthorized: false } : undefined,
     max: isNeon ? 3 : 10,
     idleTimeoutMillis: isNeon ? 10000 : 30000,
     connectionTimeoutMillis: 5000,
@@ -37,4 +36,4 @@ export { pool };
 export * from './schema'
 
 // Re-export search functions
-export { searchVideos, getVideoStats, getDistinctChannels, type VideoListItem } from './search'
+export { searchVideos, getVideoStats, getDistinctChannels, DEFAULT_PAGE_SIZE, type VideoListItem, type PaginatedResult, type PaginationCursor } from './search'

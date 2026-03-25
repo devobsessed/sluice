@@ -51,7 +51,7 @@ export async function POST(
 
     // Fetch video with transcript
     const [video] = await db
-      .select()
+      .select({ id: videos.id, transcript: videos.transcript })
       .from(videos)
       .where(eq(videos.id, videoId))
       .limit(1);

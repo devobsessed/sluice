@@ -1,6 +1,6 @@
 import { db as defaultDb } from './index'
-import { videos, type Video } from './schema'
-import { desc, or, ilike, sql } from 'drizzle-orm'
+import { videos, videoFocusAreas, type Video } from './schema'
+import { desc, or, ilike, sql, lt, and, eq, inArray, type SQL } from 'drizzle-orm'
 
 /**
  * Columns for video list views — everything except transcript.
@@ -27,29 +27,134 @@ const videoListColumns = {
 export type VideoListItem = Omit<Video, 'transcript'>
 
 /**
- * Search videos using simple ILIKE pattern matching.
+ * Opaque cursor for keyset pagination.
+ * Encodes (createdAt, id) as base64url JSON.
+ */
+export interface PaginationCursor {
+  createdAt: string // ISO 8601
+  id: number
+}
+
+export interface PaginatedResult<T> {
+  items: T[]
+  hasMore: boolean
+  nextCursor: string | null
+}
+
+export const DEFAULT_PAGE_SIZE = 24
+
+function encodeCursor(cursor: PaginationCursor): string {
+  return Buffer.from(JSON.stringify(cursor)).toString('base64url')
+}
+
+function decodeCursor(encoded: string): PaginationCursor | null {
+  try {
+    const json = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as unknown
+    if (
+      typeof json !== 'object' ||
+      json === null ||
+      typeof (json as Record<string, unknown>).createdAt !== 'string' ||
+      typeof (json as Record<string, unknown>).id !== 'number'
+    ) {
+      return null
+    }
+    return json as PaginationCursor
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Search videos using simple ILIKE pattern matching with optional cursor-based pagination.
  * Returns all columns EXCEPT transcript for payload size optimization.
  * @param query - Search query string
+ * @param options - Pagination and filter options
  * @param dbInstance - Optional database instance (for testing)
  */
-export async function searchVideos(query: string, dbInstance = defaultDb): Promise<VideoListItem[]> {
+export async function searchVideos(
+  query: string,
+  options?: { cursor?: string, limit?: number, focusAreaId?: number | null, channel?: string | null },
+  dbInstance = defaultDb,
+): Promise<PaginatedResult<VideoListItem>> {
   const trimmed = query.trim()
+  const limit = options?.limit ?? DEFAULT_PAGE_SIZE
+  const cursor = options?.cursor ? decodeCursor(options.cursor) : null
+  const focusAreaId = options?.focusAreaId ?? null
+  const channel = options?.channel ?? null
 
-  if (!trimmed) {
-    return dbInstance.select(videoListColumns).from(videos).orderBy(desc(videos.createdAt))
-  }
+  // Build conditions array
+  const conditions: SQL[] = []
 
-  const pattern = `%${trimmed}%`
-
-  return dbInstance.select(videoListColumns)
-    .from(videos)
-    .where(
+  // Search filter
+  if (trimmed) {
+    const pattern = `%${trimmed}%`
+    conditions.push(
       or(
         ilike(videos.title, pattern),
-        ilike(videos.channel, pattern)
-      )
+        ilike(videos.channel, pattern),
+      )!,
     )
-    .orderBy(desc(videos.createdAt))
+  }
+
+  // Cursor condition: (createdAt, id) < (cursorCreatedAt, cursorId) for DESC ordering
+  if (cursor) {
+    const cursorDate = new Date(cursor.createdAt)
+    if (isNaN(cursorDate.getTime())) return { items: [], hasMore: false, nextCursor: null }
+    conditions.push(
+      or(
+        lt(videos.createdAt, cursorDate),
+        and(
+          eq(videos.createdAt, cursorDate),
+          lt(videos.id, cursor.id),
+        ),
+      )!,
+    )
+  }
+
+  // Channel filter
+  if (channel) {
+    conditions.push(eq(videos.channel, channel))
+  }
+
+  // Focus area filter: subquery for video IDs in the focus area
+  if (focusAreaId !== null) {
+    conditions.push(
+      inArray(
+        videos.id,
+        dbInstance
+          .select({ videoId: videoFocusAreas.videoId })
+          .from(videoFocusAreas)
+          .where(eq(videoFocusAreas.focusAreaId, focusAreaId)),
+      ),
+    )
+  }
+
+  // Fetch limit + 1 to determine hasMore
+  const fetchLimit = limit + 1
+
+  let queryBuilder = dbInstance.select(videoListColumns).from(videos)
+
+  if (conditions.length > 0) {
+    queryBuilder = queryBuilder.where(and(...conditions)) as typeof queryBuilder
+  }
+
+  const rows = await queryBuilder
+    .orderBy(desc(videos.createdAt), desc(videos.id))
+    .limit(fetchLimit)
+
+  const hasMore = rows.length > limit
+  const items = hasMore ? rows.slice(0, limit) : rows
+
+  let nextCursor: string | null = null
+  if (hasMore && items.length > 0) {
+    const lastItem = items[items.length - 1]!
+    nextCursor = encodeCursor({
+      createdAt: lastItem.createdAt.toISOString(),
+      id: lastItem.id,
+    })
+  }
+
+  return { items, hasMore, nextCursor }
 }
 
 /**

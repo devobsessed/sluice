@@ -3,7 +3,7 @@ import { NextResponse, after } from 'next/server'
 import { start } from 'workflow/api'
 import { z } from 'zod'
 
-import { db, videos, searchVideos, getVideoStats, getDistinctChannels, videoFocusAreas, focusAreas, insights } from '@/lib/db'
+import { db, videos, searchVideos, getVideoStats, getDistinctChannels, DEFAULT_PAGE_SIZE, videoFocusAreas, focusAreas, insights } from '@/lib/db'
 import { chunkTranscript } from '@/lib/embeddings/chunker'
 import type { TranscriptSegment } from '@/lib/embeddings/types'
 import { parseTranscript } from '@/lib/transcript/parse'
@@ -35,60 +35,46 @@ const videoSchema = z.object({
   }
 });
 
+const getQuerySchema = z.object({
+  q: z.string().optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  focusAreaId: z.coerce.number().int().min(1).optional(),
+  channel: z.string().optional(),
+})
+
 export async function GET(request: Request) {
   const denied = await requireSession()
   if (denied) return denied
   const timer = startApiTimer('/api/videos', 'GET')
   try {
-    const { searchParams } = new URL(request.url);
-    const query = searchParams.get('q') || '';
-    const focusAreaIdParam = searchParams.get('focusAreaId');
-
-    // Validate focusAreaId if provided
-    let focusAreaId: number | null = null;
-    if (focusAreaIdParam) {
-      const parsed = parseInt(focusAreaIdParam, 10);
-      if (isNaN(parsed)) {
-        timer.end(400)
-        return NextResponse.json({ error: 'Invalid focus area ID' }, { status: 400 });
-      }
-      focusAreaId = parsed;
+    const { searchParams } = new URL(request.url)
+    const parsed = getQuerySchema.safeParse(Object.fromEntries(searchParams))
+    if (!parsed.success) {
+      timer.end(400)
+      return NextResponse.json(
+        { error: parsed.error.issues[0]?.message ?? 'Invalid query parameters' },
+        { status: 400 },
+      )
     }
 
-    const channelParam = searchParams.get('channel');
+    const {
+      q: query = '',
+      cursor,
+      limit = DEFAULT_PAGE_SIZE,
+      focusAreaId = null,
+      channel = null,
+    } = parsed.data
 
-    // Search videos and stats in parallel
-    const [searchResults, stats] = await Promise.all([
-      searchVideos(query),
-      getVideoStats(),
+    // Fetch videos with pagination and filters pushed into SQL
+    // Stats are only needed on the first page - skip the DB query for subsequent pages
+    const [result, stats] = await Promise.all([
+      searchVideos(query, { cursor, limit, focusAreaId, channel }),
+      cursor ? Promise.resolve(null) : getVideoStats(),
     ])
-    let videoResults = searchResults
 
-    // Filter by channel if provided (case-sensitive exact match)
-    if (channelParam) {
-      videoResults = videoResults.filter(v => v.channel === channelParam)
-    }
-
-    // Filter by focus area if provided
-    if (focusAreaId !== null) {
-      // Get video IDs assigned to this focus area
-      const assignedVideos = await db
-        .select({ videoId: videoFocusAreas.videoId })
-        .from(videoFocusAreas)
-        .where(eq(videoFocusAreas.focusAreaId, focusAreaId))
-
-      const videoIds = assignedVideos.map(v => v.videoId)
-
-      // Filter videos to only those assigned to the focus area
-      if (videoIds.length === 0) {
-        videoResults = []
-      } else {
-        videoResults = videoResults.filter(v => videoIds.includes(v.id))
-      }
-    }
-
-    // Build focus area map and summary map in parallel
-    const videoIds = videoResults.map(v => v.id)
+    // Build focus area map and summary map from current page items only
+    const videoIds = result.items.map(v => v.id)
 
     const focusAreaMap: Record<number, { id: number; name: string; color: string | null }[]> = {}
     const summaryMap: Record<number, string> = {}
@@ -130,16 +116,23 @@ export async function GET(request: Request) {
 
     timer.end(200)
     return NextResponse.json(
-      { videos: videoResults, stats, focusAreaMap, summaryMap },
-      { status: 200 }
-    );
+      {
+        videos: result.items,
+        nextCursor: result.nextCursor,
+        hasMore: result.hasMore,
+        stats,
+        focusAreaMap,
+        summaryMap,
+      },
+      { status: 200 },
+    )
   } catch (error) {
-    console.error("Error fetching videos:", error);
+    console.error("Error fetching videos:", error)
     timer.end(500)
     return NextResponse.json(
       { error: "Failed to fetch videos. Please try again." },
-      { status: 500 }
-    );
+      { status: 500 },
+    )
   }
 }
 
@@ -179,7 +172,7 @@ export async function POST(request: Request) {
     // Check for duplicate only for YouTube videos
     if (sourceType === 'youtube' && youtubeId) {
       const existingVideo = await db
-        .select()
+        .select({ id: videos.id })
         .from(videos)
         .where(eq(videos.youtubeId, youtubeId))
         .limit(1);

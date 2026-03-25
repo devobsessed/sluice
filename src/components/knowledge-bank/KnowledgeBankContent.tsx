@@ -14,6 +14,7 @@ import { useSearch } from '@/hooks/useSearch'
 import { useEnsemble } from '@/hooks/useEnsemble'
 import { useChipFilters } from '@/hooks/useChipFilters'
 import { useVideoSort } from '@/hooks/useVideoSort'
+import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
 import { usePageTitle } from '@/components/layout/PageTitleContext'
 import { useFocusArea } from '@/components/providers/FocusAreaProvider'
 import { useURLParams } from '@/hooks/useURLParams'
@@ -31,9 +32,11 @@ type FocusAreaMapEntry = Pick<FocusArea, 'id' | 'name' | 'color'>
 
 interface ApiResponse {
   videos: VideoListItem[];
-  stats: VideoStats;
+  stats?: VideoStats;  // only present on the first page (no cursor)
   focusAreaMap: Record<number, FocusAreaMapEntry[]>;
   summaryMap: Record<number, string>;
+  hasMore: boolean;
+  nextCursor: string | null;
 }
 
 export function KnowledgeBankContent() {
@@ -42,6 +45,9 @@ export function KnowledgeBankContent() {
   const [isLoadingVideos, setIsLoadingVideos] = useState(true);
   const [focusAreaMap, setFocusAreaMap] = useState<Record<number, FocusAreaMapEntry[]>>({});
   const [summaryMap, setSummaryMap] = useState<Record<number, string>>({});
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasActivePersonas, setHasActivePersonas] = useState(false);
 
   // Set page title
@@ -75,51 +81,95 @@ export function KnowledgeBankContent() {
     setPageTitle({ title: 'Knowledge Bank' });
   }, [setPageTitle]);
 
-  // Load videos (re-fetches when focus area changes)
-  useEffect(() => {
-    async function fetchVideos() {
-      try {
-        setIsLoadingVideos(true);
-        const params = new URLSearchParams();
-        if (selectedFocusAreaId !== null) {
-          params.set('focusAreaId', String(selectedFocusAreaId));
-        }
-        if (urlChannel) {
-          params.set('channel', urlChannel);
-        }
-        const url = `/api/videos${params.toString() ? `?${params}` : ''}`;
-        const response = await fetch(url);
-
-        if (!response.ok) {
-          throw new Error('Failed to fetch videos');
-        }
-
-        const data: ApiResponse = await response.json();
-
-        // Map dates from strings to Date objects
-        const mappedVideos = data.videos.map((video) => ({
-          ...video,
-          createdAt: new Date(video.createdAt),
-          updatedAt: new Date(video.updatedAt),
-        }));
-
-        setVideos(mappedVideos);
-        setStats(data.stats);
-        setFocusAreaMap(data.focusAreaMap || {});
-        setSummaryMap(data.summaryMap || {});
-      } catch (error) {
-        console.error('Error fetching videos:', error);
-        setVideos([]);
-        setStats({ count: 0, totalHours: 0, channels: 0 });
-        setFocusAreaMap({});
-        setSummaryMap({});
-      } finally {
-        setIsLoadingVideos(false);
-      }
+  // Fetch a single page of videos - first page replaces state, subsequent pages append
+  const fetchPage = useCallback(async (cursor?: string) => {
+    const isFirstPage = !cursor
+    if (isFirstPage) {
+      setIsLoadingVideos(true)
+    } else {
+      setIsLoadingMore(true)
     }
 
-    fetchVideos();
-  }, [selectedFocusAreaId, urlChannel]);
+    try {
+      const params = new URLSearchParams()
+      if (selectedFocusAreaId !== null) {
+        params.set('focusAreaId', String(selectedFocusAreaId))
+      }
+      if (urlChannel) {
+        params.set('channel', urlChannel)
+      }
+      if (cursor) {
+        params.set('cursor', cursor)
+      }
+      const url = `/api/videos${params.toString() ? `?${params}` : ''}`
+      const response = await fetch(url)
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch videos')
+      }
+
+      const data: ApiResponse = await response.json()
+
+      // Map dates from strings to Date objects
+      const mappedVideos = data.videos.map((video) => ({
+        ...video,
+        createdAt: new Date(video.createdAt),
+        updatedAt: new Date(video.updatedAt),
+      }))
+
+      if (isFirstPage) {
+        setVideos(mappedVideos)
+        setStats(data.stats ?? null)
+        setFocusAreaMap(data.focusAreaMap || {})
+        setSummaryMap(data.summaryMap || {})
+      } else {
+        setVideos(prev => [...prev, ...mappedVideos])
+        setFocusAreaMap(prev => ({ ...prev, ...data.focusAreaMap }))
+        setSummaryMap(prev => ({ ...prev, ...data.summaryMap }))
+      }
+
+      setHasMore(data.hasMore)
+      setNextCursor(data.nextCursor)
+    } catch (error) {
+      console.error('Error fetching videos:', error)
+      if (isFirstPage) {
+        setVideos([])
+        setStats({ count: 0, totalHours: 0, channels: 0 })
+        setFocusAreaMap({})
+        setSummaryMap({})
+      }
+      setHasMore(false)
+      setNextCursor(null)
+    } finally {
+      if (isFirstPage) {
+        setIsLoadingVideos(false)
+      } else {
+        setIsLoadingMore(false)
+      }
+    }
+  }, [selectedFocusAreaId, urlChannel])
+
+  // Reload page 1 when filters change
+  useEffect(() => {
+    setVideos([])
+    setNextCursor(null)
+    setHasMore(false)
+    fetchPage()
+  }, [fetchPage])
+
+  // Load next page handler
+  const handleLoadMore = useCallback(() => {
+    if (nextCursor) {
+      fetchPage(nextCursor)
+    }
+  }, [nextCursor, fetchPage])
+
+  // Infinite scroll - observes sentinel at bottom of video grid
+  const { sentinelRef } = useInfiniteScroll({
+    hasMore,
+    isLoading: isLoadingMore,
+    onLoadMore: handleLoadMore,
+  })
 
   // Chip filters — provides chips, activeIds, filtered videos, and toggle handler
   const { chips, activeIds, filteredVideos: chipFilteredVideos, handleToggle } = useChipFilters({
@@ -260,6 +310,7 @@ export function KnowledgeBankContent() {
             <VideoGrid
               videos={sortedVideos}
               isLoading={isLoadingVideos}
+              isLoadingMore={isLoadingMore}
               emptyMessage={
                 activeIds.size > 0
                   ? 'No videos match these filters'
@@ -279,6 +330,7 @@ export function KnowledgeBankContent() {
               onToggleFocusArea={handleToggleFocusArea}
               returnTo={returnTo || undefined}
               summaryMap={summaryMap}
+              sentinelRef={sentinelRef}
             />
           )}
         </>

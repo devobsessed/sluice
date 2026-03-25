@@ -1,3 +1,4 @@
+import { cache } from 'react'
 import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import { db, videos } from '@/lib/db'
@@ -8,7 +9,7 @@ interface VideoDetailPageProps {
   params: Promise<{ id: string }>
 }
 
-async function getVideo(id: string) {
+const getVideo = cache(async (id: string) => {
   if (!/^\d+$/.test(id)) return null
   const videoId = Number(id)
 
@@ -19,7 +20,7 @@ async function getVideo(id: string) {
     .limit(1)
 
   return result[0] ?? null
-}
+})
 
 export async function generateMetadata({ params }: VideoDetailPageProps): Promise<Metadata> {
   const { id } = await params

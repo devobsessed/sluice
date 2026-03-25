@@ -37,7 +37,7 @@ export function DiscoveryVideoGrid({
   // Sort videos by publishedAt descending (newest first)
   const sortedVideos = useMemo(() => {
     return [...videos].sort((a, b) => {
-      return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+      return (b.publishedAt ? new Date(b.publishedAt).getTime() : 0) - (a.publishedAt ? new Date(a.publishedAt).getTime() : 0)
     })
   }, [videos])
 

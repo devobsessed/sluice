@@ -28,7 +28,7 @@ describe('DiscoveryContent', () => {
   it('should render empty state when no channels are followed', async () => {
     ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,
-      json: async () => [],
+      json: async () => ({ channels: [], videos: [] }),
     })
 
     render(<DiscoveryContent />)

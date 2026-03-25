@@ -113,20 +113,24 @@ vi.mock('@/lib/db', async () => {
 // ---- Mock @/lib/db/search ---------------------------------------------------
 // Returns one video so the parallel block is exercised.
 vi.mock('@/lib/db/search', () => ({
-  searchVideos: vi.fn().mockResolvedValue([
-    {
-      id: 1,
-      youtubeId: 'test-video',
-      title: 'Test Video',
-      channel: 'Test Channel',
-      thumbnail: null,
-      duration: null,
-      description: null,
-      publishedAt: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    },
-  ]),
+  searchVideos: vi.fn().mockResolvedValue({
+    items: [
+      {
+        id: 1,
+        youtubeId: 'test-video',
+        title: 'Test Video',
+        channel: 'Test Channel',
+        thumbnail: null,
+        duration: null,
+        description: null,
+        publishedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ],
+    hasMore: false,
+    nextCursor: null,
+  }),
   getVideoStats: vi.fn().mockResolvedValue({ count: 1, channels: 1 }),
   getDistinctChannels: vi.fn().mockResolvedValue([]),
 }))

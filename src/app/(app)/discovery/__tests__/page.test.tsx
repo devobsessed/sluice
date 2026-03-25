@@ -46,6 +46,23 @@ vi.mock('@/components/layout/PageTitleContext', () => ({
 // Mock fetch
 global.fetch = vi.fn()
 
+// Helper: mock a single /api/discovery call
+const mockDiscoveryFetch = (channels: unknown[], videos: unknown[]) => {
+  ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    ok: true,
+    json: async () => ({ channels, videos }),
+  })
+}
+
+// Helper: mock a failed /api/discovery call
+const mockDiscoveryFetchError = (errorMessage: string) => {
+  ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    ok: false,
+    status: 500,
+    json: async () => ({ error: errorMessage }),
+  })
+}
+
 describe('Discovery Page', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -53,11 +70,7 @@ describe('Discovery Page', () => {
   })
 
   it('should show empty state when no channels are followed', async () => {
-    // Mock /api/channels - returns empty array
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => [],
-    })
+    mockDiscoveryFetch([], [])
 
     render(<Discovery />)
 
@@ -67,10 +80,7 @@ describe('Discovery Page', () => {
   })
 
   it('should render follow channel input', async () => {
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => [],
-    })
+    mockDiscoveryFetch([], [])
 
     render(<Discovery />)
 
@@ -114,17 +124,7 @@ describe('Discovery Page', () => {
       },
     ]
 
-    // Mock /api/channels
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => mockChannels,
-    })
-
-    // Mock /api/channels/videos — now includes bankVideoId and focusAreas
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => mockDiscoveryVideos,
-    })
+    mockDiscoveryFetch(mockChannels, mockDiscoveryVideos)
 
     render(<Discovery />)
 
@@ -147,11 +147,7 @@ describe('Discovery Page', () => {
   })
 
   it('should show error state when fetch fails', async () => {
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-      json: async () => ({ error: 'Server error' }),
-    })
+    mockDiscoveryFetchError('Server error')
 
     render(<Discovery />)
 
@@ -163,11 +159,8 @@ describe('Discovery Page', () => {
   it('should refetch videos when a new channel is followed', async () => {
     const user = userEvent.setup()
 
-    // Initial empty channels
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => [],
-    })
+    // Initial empty state
+    mockDiscoveryFetch([], [])
 
     render(<Discovery />)
 
@@ -192,17 +185,16 @@ describe('Discovery Page', () => {
       json: async () => ({ channel: mockNewChannel }),
     })
 
-    // Updated: chunk 2 added /api/channels/videos/refresh POST call before fetchVideos
     // Mock refresh endpoint
     ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,
       json: async () => ({ videoCount: 1, channelCount: 1, errors: [] }),
     })
 
-    // Mock /api/channels/videos GET (called by fetchVideos) — includes new fields
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => [{
+    // Mock /api/discovery re-fetch after following new channel
+    mockDiscoveryFetch(
+      [mockNewChannel],
+      [{
         youtubeId: 'new-vid',
         title: 'New Video',
         channelId: 'UCnew',
@@ -212,8 +204,8 @@ describe('Discovery Page', () => {
         inBank: false,
         bankVideoId: null,
         focusAreas: [],
-      }],
-    })
+      }]
+    )
 
     // Submit follow
     await user.type(screen.getByPlaceholderText(/youtube channel url/i), 'https://youtube.com/@newchannel')
@@ -249,17 +241,7 @@ describe('Discovery Page', () => {
       },
     ]
 
-    // Initial channels fetch
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => mockChannels,
-    })
-
-    // Mock videos fetch — single call now includes bank data
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => mockVideos,
-    })
+    mockDiscoveryFetch(mockChannels, mockVideos)
 
     render(<Discovery />)
 
@@ -276,17 +258,7 @@ describe('Discovery Page', () => {
       createdAt: new Date().toISOString(),
     }
 
-    // Mock channels fetch
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => [mockChannel],
-    })
-
-    // Mock videos fetch — single call
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => [],
-    })
+    mockDiscoveryFetch([mockChannel], [])
 
     render(<Discovery />)
 
@@ -298,10 +270,7 @@ describe('Discovery Page', () => {
   })
 
   it('should not render refresh button when no channels exist', async () => {
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => [],
-    })
+    mockDiscoveryFetch([], [])
 
     render(<Discovery />)
 
@@ -310,7 +279,7 @@ describe('Discovery Page', () => {
     })
   })
 
-  it('should refetch videos when refresh button is clicked', async () => {
+  it('should refetch via /api/discovery when refresh button is clicked', async () => {
     const user = userEvent.setup()
 
     const mockChannel = {
@@ -334,17 +303,8 @@ describe('Discovery Page', () => {
       },
     ]
 
-    // Initial channels fetch
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => [mockChannel],
-    })
-
-    // Mock initial videos fetch — single call
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => mockVideos,
-    })
+    // Initial load
+    mockDiscoveryFetch([mockChannel], mockVideos)
 
     render(<Discovery />)
 
@@ -362,26 +322,20 @@ describe('Discovery Page', () => {
       json: async () => ({ videoCount: 1, channelCount: 1, errors: [] }),
     })
 
-    // Mock /api/channels/videos refetch — single call with updated data
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => mockVideos,
-    })
+    // Mock /api/discovery re-fetch after refresh
+    mockDiscoveryFetch([mockChannel], mockVideos)
 
     // Click refresh button
     const refreshButton = screen.getByRole('button', { name: /refresh all channels/i })
     await user.click(refreshButton)
 
-    // Should re-fetch channel videos
+    // Should re-fetch via /api/discovery
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith('/api/channels/videos')
+      expect(global.fetch).toHaveBeenCalledWith('/api/discovery')
     })
   })
 
   describe('Channel Filter Integration', () => {
-    // Note: Filter behavior tests now covered in "URL State Management" describe block
-    // These tests verify UI rendering only
-
     it('should render channel filter dropdown when channels exist', async () => {
       const mockChannels = [
         {
@@ -412,17 +366,7 @@ describe('Discovery Page', () => {
         },
       ]
 
-      // Mock /api/channels
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockChannels,
-      })
-
-      // Mock /api/channels/videos — single call
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVideos,
-      })
+      mockDiscoveryFetch(mockChannels, mockVideos)
 
       render(<Discovery />)
 
@@ -432,10 +376,7 @@ describe('Discovery Page', () => {
     })
 
     it('should not render channel filter dropdown when no channels exist', async () => {
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => [],
-      })
+      mockDiscoveryFetch([], [])
 
       render(<Discovery />)
 
@@ -446,9 +387,6 @@ describe('Discovery Page', () => {
   })
 
   describe('Content Type Filter Integration', () => {
-    // Note: Filter behavior tests now covered in "URL State Management" describe block
-    // These tests verify UI rendering only
-
     it('should render content type filter dropdown when channels exist', async () => {
       const mockChannels = [
         {
@@ -473,17 +411,7 @@ describe('Discovery Page', () => {
         },
       ]
 
-      // Mock /api/channels
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockChannels,
-      })
-
-      // Mock /api/channels/videos — single call
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVideos,
-      })
+      mockDiscoveryFetch(mockChannels, mockVideos)
 
       render(<Discovery />)
 
@@ -493,10 +421,7 @@ describe('Discovery Page', () => {
     })
 
     it('should not render content type filter when no channels exist', async () => {
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => [],
-      })
+      mockDiscoveryFetch([], [])
 
       render(<Discovery />)
 
@@ -550,17 +475,7 @@ describe('Discovery Page', () => {
         },
       ]
 
-      // Mock /api/channels
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockChannels,
-      })
-
-      // Mock /api/channels/videos — single call
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVideos,
-      })
+      mockDiscoveryFetch(mockChannels, mockVideos)
 
       render(<Discovery />)
 
@@ -608,17 +523,7 @@ describe('Discovery Page', () => {
         },
       ]
 
-      // Mock /api/channels
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockChannels,
-      })
-
-      // Mock /api/channels/videos — single call
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVideos,
-      })
+      mockDiscoveryFetch(mockChannels, mockVideos)
 
       render(<Discovery />)
 
@@ -654,17 +559,7 @@ describe('Discovery Page', () => {
         focusAreas: [],
       }))
 
-      // Mock /api/channels
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockChannels,
-      })
-
-      // Mock /api/channels/videos — single call
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVideos,
-      })
+      mockDiscoveryFetch(mockChannels, mockVideos)
 
       render(<Discovery />)
 
@@ -703,17 +598,7 @@ describe('Discovery Page', () => {
         },
       ]
 
-      // Mock /api/channels
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockChannels,
-      })
-
-      // Mock /api/channels/videos — single call
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVideos,
-      })
+      mockDiscoveryFetch(mockChannels, mockVideos)
 
       render(<Discovery />)
 
@@ -759,17 +644,7 @@ describe('Discovery Page', () => {
         },
       ]
 
-      // Mock /api/channels
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockChannels,
-      })
-
-      // Mock /api/channels/videos — single call
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVideos,
-      })
+      mockDiscoveryFetch(mockChannels, mockVideos)
 
       render(<Discovery />)
 
@@ -817,17 +692,7 @@ describe('Discovery Page', () => {
         focusAreas: [],
       }))
 
-      // Mock /api/channels
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockChannels,
-      })
-
-      // Mock /api/channels/videos — single call
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVideos,
-      })
+      mockDiscoveryFetch(mockChannels, mockVideos)
 
       render(<Discovery />)
 
@@ -875,17 +740,7 @@ describe('Discovery Page', () => {
         focusAreas: [],
       }))
 
-      // Mock /api/channels
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockChannels,
-      })
-
-      // Mock /api/channels/videos — single call
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVideos,
-      })
+      mockDiscoveryFetch(mockChannels, mockVideos)
 
       render(<Discovery />)
 
@@ -941,17 +796,7 @@ describe('Discovery Page', () => {
         },
       ]
 
-      // Mock /api/channels
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockChannels,
-      })
-
-      // Mock /api/channels/videos — single call
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVideos,
-      })
+      mockDiscoveryFetch(mockChannels, mockVideos)
 
       render(<Discovery />)
 
@@ -995,17 +840,7 @@ describe('Discovery Page', () => {
         },
       ]
 
-      // Mock /api/channels
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockChannels,
-      })
-
-      // Mock /api/channels/videos — single call
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVideos,
-      })
+      mockDiscoveryFetch(mockChannels, mockVideos)
 
       render(<Discovery />)
 
@@ -1054,17 +889,7 @@ describe('Discovery Page', () => {
         },
       ]
 
-      // Mock /api/channels
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockChannels,
-      })
-
-      // Mock /api/channels/videos — single call
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVideos,
-      })
+      mockDiscoveryFetch(mockChannels, mockVideos)
 
       render(<Discovery />)
 
@@ -1102,17 +927,7 @@ describe('Discovery Page', () => {
         focusAreas: [],
       }))
 
-      // Mock /api/channels
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockChannels,
-      })
-
-      // Mock /api/channels/videos — single call
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVideos,
-      })
+      mockDiscoveryFetch(mockChannels, mockVideos)
 
       render(<Discovery />)
 
@@ -1147,17 +962,7 @@ describe('Discovery Page', () => {
         focusAreas: [],
       }))
 
-      // Mock /api/channels
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockChannels,
-      })
-
-      // Mock /api/channels/videos — single call
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVideos,
-      })
+      mockDiscoveryFetch(mockChannels, mockVideos)
 
       render(<Discovery />)
 
@@ -1192,17 +997,7 @@ describe('Discovery Page', () => {
         focusAreas: [],
       }))
 
-      // Mock /api/channels
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockChannels,
-      })
-
-      // Mock /api/channels/videos — single call
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVideos,
-      })
+      mockDiscoveryFetch(mockChannels, mockVideos)
 
       render(<Discovery />)
 

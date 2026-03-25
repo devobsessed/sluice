@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, act, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ChatHubDrawer } from '../ChatHubDrawer'
+import { PersonaStatusProvider } from '@/components/providers/PersonaStatusProvider'
 import type { ChatStorageV2 } from '@/lib/personas/chat-storage'
 
 // ── localStorage mock ──────────────────────────────────────────────────────────
@@ -35,6 +36,12 @@ vi.mock('@/hooks/usePersonaChat', () => ({
   isChatMessage: (entry: { type?: string }) =>
     !('type' in entry && entry.type === 'thread-boundary'),
 }))
+
+// ── Provider wrapper ───────────────────────────────────────────────────────────
+
+function Wrapper({ children }: { children: React.ReactNode }) {
+  return <PersonaStatusProvider>{children}</PersonaStatusProvider>
+}
 
 // ── Status response fixtures ───────────────────────────────────────────────────
 
@@ -77,9 +84,10 @@ const statusNoPersonas = {
 // ── Helper: render with resolved personas ─────────────────────────────────────
 
 /**
- * Renders ChatHubDrawer and waits for the deferred fetch to complete.
- * Uses fake timers to advance the 1500ms defer, then restores real timers
- * for subsequent interactions (Radix UI animations need real timers).
+ * Renders ChatHubDrawer wrapped in PersonaStatusProvider and waits for the
+ * deferred fetch to complete. Uses fake timers to advance the 1500ms defer,
+ * then restores real timers for subsequent interactions (Radix UI animations
+ * need real timers).
  */
 async function renderWithLoad(status: typeof statusWithPersonas | typeof statusNoPersonas) {
   vi.useFakeTimers()
@@ -88,7 +96,7 @@ async function renderWithLoad(status: typeof statusWithPersonas | typeof statusN
     json: async () => status,
   } as Response)
 
-  const result = render(<ChatHubDrawer />)
+  const result = render(<ChatHubDrawer />, { wrapper: Wrapper })
 
   await act(async () => {
     await vi.advanceTimersByTimeAsync(1500)
@@ -123,7 +131,7 @@ describe('ChatHubDrawer', () => {
       json: async () => statusNoPersonas,
     } as Response)
 
-    render(<ChatHubDrawer />)
+    render(<ChatHubDrawer />, { wrapper: Wrapper })
     vi.useRealTimers()
   })
 
@@ -248,7 +256,7 @@ describe('ChatHubDrawer', () => {
     vi.useFakeTimers()
     vi.mocked(fetch).mockRejectedValue(new Error('Network error'))
 
-    render(<ChatHubDrawer />)
+    render(<ChatHubDrawer />, { wrapper: Wrapper })
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1500)
@@ -266,7 +274,7 @@ describe('ChatHubDrawer', () => {
       json: async () => ({ error: 'Unauthorized' }),
     } as Response)
 
-    render(<ChatHubDrawer />)
+    render(<ChatHubDrawer />, { wrapper: Wrapper })
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1500)
@@ -275,10 +283,5 @@ describe('ChatHubDrawer', () => {
     vi.useRealTimers()
 
     expect(screen.queryByRole('button', { name: /open chat hub/i })).not.toBeInTheDocument()
-  })
-
-  it('calls /api/personas/status endpoint', async () => {
-    await renderWithLoad(statusWithPersonas)
-    expect(fetch).toHaveBeenCalledWith('/api/personas/status')
   })
 })

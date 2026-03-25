@@ -27,6 +27,18 @@ vi.mock('@/components/layout/PageTitleContext', () => ({
   }),
 }))
 
+// Mock PersonaStatusProvider
+const mockUsePersonaStatus = vi.fn(() => ({
+  channels: [],
+  threshold: 5,
+  isLoading: false,
+  updateChannel: vi.fn(),
+  refetch: vi.fn(),
+}))
+vi.mock('@/components/providers/PersonaStatusProvider', () => ({
+  usePersonaStatus: () => mockUsePersonaStatus(),
+}))
+
 // Mock FocusAreaProvider
 vi.mock('@/components/providers/FocusAreaProvider', () => ({
   useFocusArea: () => ({
@@ -68,6 +80,19 @@ import { useEnsemble } from '@/hooks/useEnsemble'
 
 const mockUseSearch = useSearch as ReturnType<typeof vi.fn>
 const mockUseEnsemble = useEnsemble as ReturnType<typeof vi.fn>
+
+// Mock IntersectionObserver - not available in jsdom
+class MockIntersectionObserver {
+  observe = vi.fn()
+  unobserve = vi.fn()
+  disconnect = vi.fn()
+  takeRecords = () => []
+  root = null
+  rootMargin = ''
+  thresholds = []
+  constructor(_callback: IntersectionObserverCallback) {}
+}
+global.IntersectionObserver = MockIntersectionObserver as unknown as typeof IntersectionObserver
 
 // Mock fetch
 global.fetch = vi.fn()
@@ -214,24 +239,26 @@ describe('Home Page - Ensemble Trigger', () => {
   })
 
   it('displays updated hint text when personas are active', async () => {
+    // Override persona status mock to return active personas
+    mockUsePersonaStatus.mockReturnValue({
+      channels: [
+        {
+          channelName: 'Test Channel',
+          transcriptCount: 50,
+          personaId: 1,
+          personaCreatedAt: new Date().toISOString(),
+          personaName: 'Test',
+          expertiseTopics: null,
+        },
+      ],
+      threshold: 30,
+      isLoading: false,
+      updateChannel: vi.fn(),
+      refetch: vi.fn(),
+    })
+
     // Override fetch to return videos so empty state doesn't show
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (url) => {
-      if (typeof url === 'string' && url.includes('/api/personas/status')) {
-        return {
-          ok: true,
-          json: async () => ({
-            channels: [
-              {
-                channelName: 'Test Channel',
-                transcriptCount: 50,
-                personaId: 1,
-                personaCreatedAt: new Date(),
-              },
-            ],
-            threshold: 30,
-          }),
-        }
-      }
+    ;(global.fetch as ReturnType<typeof vi.fn>).mockImplementation(async () => {
       return {
         ok: true,
         json: async () => ({
@@ -254,12 +281,11 @@ describe('Home Page - Ensemble Trigger', () => {
 
     render(<KnowledgeBankContent />)
 
-    // Wait for persona status to load — PersonaStatus defers its fetch by 2s,
-    // so we need a longer timeout than the default 1s
+    // Persona data comes from the mocked provider (no deferred fetch)
     await waitFor(() => {
       const hint = screen.queryByText(/End with \? to ask your personas/i)
       expect(hint).toBeInTheDocument()
-    }, { timeout: 5000 })
+    })
 
     // Should not show old hint text
     expect(screen.queryByText(/Ask a question \(3\+ words\) to hear from your personas/i)).not.toBeInTheDocument()

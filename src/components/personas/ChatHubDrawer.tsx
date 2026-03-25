@@ -7,22 +7,9 @@ import { ChatHub } from './ChatHub'
 import { PersonaChatDrawer } from './PersonaChatDrawer'
 import type { Persona } from './ChatHub'
 import { cn } from '@/lib/utils'
+import { usePersonaStatus } from '@/components/providers/PersonaStatusProvider'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
-
-interface StatusChannel {
-  channelName: string
-  transcriptCount: number
-  personaId: number | null
-  personaCreatedAt: string | null
-  personaName: string | null
-  expertiseTopics: string[] | null
-}
-
-interface StatusResponse {
-  channels: StatusChannel[]
-  threshold: number
-}
 
 type Screen = 'hub' | 'chat'
 
@@ -32,37 +19,19 @@ export function ChatHubDrawer() {
   const [open, setOpen] = useState(false)
   const [screen, setScreen] = useState<Screen>('hub')
   const [activePersona, setActivePersona] = useState<Persona | null>(null)
-  const [personas, setPersonas] = useState<Persona[]>([])
-  const [isLoading, setIsLoading] = useState(true)
 
-  // Fetch persona status on mount (deferred 1500ms)
-  useEffect(() => {
-    const timer = setTimeout(async () => {
-      try {
-        const response = await fetch('/api/personas/status')
-        if (!response.ok) {
-          setIsLoading(false)
-          return
-        }
-        const data: StatusResponse = await response.json()
-        const activePersonas: Persona[] = data.channels
-          .filter((c) => c.personaId !== null)
-          .map((c) => ({
-            id: c.personaId!,
-            name: c.personaName ?? c.channelName,
-            channelName: c.channelName,
-            expertiseTopics: c.expertiseTopics ?? [],
-          }))
-        setPersonas(activePersonas)
-      } catch {
-        // Silently fail — chat hub is non-critical
-      } finally {
-        setIsLoading(false)
-      }
-    }, 1500)
+  // Consume from shared provider instead of independent fetch
+  const { channels, isLoading } = usePersonaStatus()
 
-    return () => clearTimeout(timer)
-  }, [])
+  // Derive personas from provider data
+  const personas: Persona[] = channels
+    .filter((c) => c.personaId !== null)
+    .map((c) => ({
+      id: c.personaId!,
+      name: c.personaName ?? c.channelName,
+      channelName: c.channelName,
+      expertiseTopics: c.expertiseTopics ?? [],
+    }))
 
   // Listen for persona-chat:open CustomEvent from PersonaStatus
   useEffect(() => {
