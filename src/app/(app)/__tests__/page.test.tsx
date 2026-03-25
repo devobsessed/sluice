@@ -81,6 +81,19 @@ import { useEnsemble } from '@/hooks/useEnsemble'
 const mockUseSearch = useSearch as ReturnType<typeof vi.fn>
 const mockUseEnsemble = useEnsemble as ReturnType<typeof vi.fn>
 
+// Mock IntersectionObserver - not available in jsdom
+class MockIntersectionObserver {
+  observe = vi.fn()
+  unobserve = vi.fn()
+  disconnect = vi.fn()
+  takeRecords = () => []
+  root = null
+  rootMargin = ''
+  thresholds = []
+  constructor(_callback: IntersectionObserverCallback) {}
+}
+global.IntersectionObserver = MockIntersectionObserver as unknown as typeof IntersectionObserver
+
 // Mock fetch
 global.fetch = vi.fn()
 
