@@ -76,7 +76,7 @@ Sluice uses pgvector for 384-dimensional vector embeddings (all-MiniLM-L6-v2 mod
   ```bash
   DATABASE_URL="postgresql://neondb_owner:PASSWORD@ep-XXXXX.us-east-2.aws.neon.tech/neondb?sslmode=verify-full" npm run db:push
   ```
-- [ ] Drizzle will create all 11 tables: `videos`, `channels`, `insights`, `settings`, `chunks`, `relationships`, `temporal_metadata`, `jobs`, `focus_areas`, `video_focus_areas`, `personas`
+- [ ] Drizzle will create all tables including: `videos`, `channels`, `discovery_videos`, `insights`, `settings`, `chunks`, `relationships`, `temporal_metadata`, `jobs`, `focus_areas`, `video_focus_areas`, `personas`, `access_requests`, and Better Auth/OAuth tables
 - [ ] Verify with Drizzle Studio or SQL Editor:
   ```sql
   SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;

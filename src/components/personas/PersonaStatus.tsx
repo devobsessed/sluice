@@ -88,7 +88,7 @@ export function PersonaStatus({ onActivePersonasChange }: PersonaStatusProps) {
 
       // Update shared provider state so ChatHubDrawer also sees the new persona
       updateChannel(channelName, {
-        personaId: result.personaId,
+        personaId: result.persona.id,
         personaCreatedAt: new Date().toISOString(),
       })
 

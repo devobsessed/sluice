@@ -141,7 +141,7 @@ describe('useInfiniteScroll', () => {
     expect(mockDisconnect).toHaveBeenCalledTimes(1)
   })
 
-  it('does NOT call onLoadMore again when both hasMore and isLoading are false', () => {
+  it('does NOT call onLoadMore when hasMore=false even if isLoading=true', () => {
     const onLoadMore = vi.fn()
 
     renderHook(() =>

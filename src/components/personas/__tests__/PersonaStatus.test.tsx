@@ -219,7 +219,7 @@ describe('PersonaStatus', () => {
       } as Response)
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ personaId: 42 }),
+        json: async () => ({ persona: { id: 42 } }),
       } as Response)
 
     render(<PersonaStatus />, { wrapper: Wrapper })

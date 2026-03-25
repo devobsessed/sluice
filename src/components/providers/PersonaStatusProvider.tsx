@@ -28,6 +28,7 @@ export function PersonaStatusProvider({ children }: { children: React.ReactNode 
   const [isLoading, setIsLoading] = useState(true)
 
   const fetchStatus = useCallback(async () => {
+    setIsLoading(true)
     try {
       const response = await fetch('/api/personas/status')
       if (!response.ok) return

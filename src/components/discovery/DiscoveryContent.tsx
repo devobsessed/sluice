@@ -48,6 +48,7 @@ export function DiscoveryContent() {
   // Fetch all discovery data in a single call
   const fetchDiscoveryData = useCallback(async () => {
     setIsLoading(true)
+    setError(null)
     try {
       const response = await fetch('/api/discovery')
       if (!response.ok) {
