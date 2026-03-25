@@ -39,7 +39,7 @@ const getQuerySchema = z.object({
   q: z.string().optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
-  focusAreaId: z.coerce.number().int().optional(),
+  focusAreaId: z.coerce.number().int().min(1).optional(),
   channel: z.string().optional(),
 })
 

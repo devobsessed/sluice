@@ -65,7 +65,7 @@ export function PersonaStatus({ onActivePersonasChange }: PersonaStatusProps) {
 
   // Notify parent about active personas whenever channels data changes
   useEffect(() => {
-    if (!isLoading && channels.length > 0) {
+    if (!isLoading) {
       const hasActive = channels.some(c => c.personaId !== null)
       onActivePersonasChange?.(hasActive)
     }

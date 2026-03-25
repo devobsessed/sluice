@@ -99,6 +99,7 @@ export async function searchVideos(
   // Cursor condition: (createdAt, id) < (cursorCreatedAt, cursorId) for DESC ordering
   if (cursor) {
     const cursorDate = new Date(cursor.createdAt)
+    if (isNaN(cursorDate.getTime())) return { items: [], hasMore: false, nextCursor: null }
     conditions.push(
       or(
         lt(videos.createdAt, cursorDate),

@@ -10,26 +10,28 @@ export async function GET() {
   if (denied) return denied
   const timer = startApiTimer('/api/personas/status', 'GET')
   try {
-    // Step 1: Count videos per channel (simple GROUP BY on one column)
-    const channelCounts = await db
-      .select({
-        channelName: videos.channel,
-        transcriptCount: sql<number>`count(${videos.id})::int`,
-      })
-      .from(videos)
-      .where(isNotNull(videos.channel))
-      .groupBy(videos.channel)
-
-    // Step 2: Get all personas (small table, typically < 20 rows)
-    const allPersonas = await db
-      .select({
-        id: personas.id,
-        channelName: personas.channelName,
-        createdAt: personas.createdAt,
-        name: personas.name,
-        expertiseTopics: personas.expertiseTopics,
-      })
-      .from(personas)
+    // Steps 1 & 2 run in parallel — independent queries with no shared state
+    const [channelCounts, allPersonas] = await Promise.all([
+      // Count videos per channel (simple GROUP BY on one column)
+      db
+        .select({
+          channelName: videos.channel,
+          transcriptCount: sql<number>`count(${videos.id})::int`,
+        })
+        .from(videos)
+        .where(isNotNull(videos.channel))
+        .groupBy(videos.channel),
+      // Get all personas (small table, typically < 20 rows)
+      db
+        .select({
+          id: personas.id,
+          channelName: personas.channelName,
+          createdAt: personas.createdAt,
+          name: personas.name,
+          expertiseTopics: personas.expertiseTopics,
+        })
+        .from(personas),
+    ])
 
     // Step 3: Merge in application code
     const personaMap = new Map(

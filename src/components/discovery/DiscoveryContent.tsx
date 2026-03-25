@@ -53,6 +53,10 @@ export function DiscoveryContent() {
       if (!response.ok) {
         const data = await response.json()
         setError(data.error || 'Failed to load discovery data')
+        setChannels([])
+        setDiscoveryVideos([])
+        setBankIdMap({})
+        setFocusAreaMap({})
         return
       }
 
