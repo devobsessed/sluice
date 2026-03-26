@@ -20,7 +20,7 @@ interface UseBatchAddReturn {
   results: { success: number; failed: number }
 }
 
-const CONCURRENCY_LIMIT = 2
+const CONCURRENCY_LIMIT = 1
 const MAX_BATCH_SIZE = 50
 
 export function useBatchAdd(options?: UseBatchAddOptions): UseBatchAddReturn {
@@ -141,6 +141,9 @@ export function useBatchAdd(options?: UseBatchAddOptions): UseBatchAddReturn {
     if (!video) return
 
     await processVideo(video)
+
+    // Wait 1s between videos to avoid YouTube rate limiting
+    await new Promise(resolve => setTimeout(resolve, 1000))
 
     // Process next item in queue
     await processNext()
