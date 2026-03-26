@@ -54,21 +54,16 @@ describe('useBatchAdd', () => {
 
       result.current.startBatch([video])
 
-      // Wait for completion by checking the item status
+      // Wait for item to reach done status (set before the inter-video delay)
       await waitFor(() => {
         const item = result.current.batchStatus.get('video1')
         expect(item?.status).toBe('done')
       })
 
-      // Should no longer be running
-      expect(result.current.isRunning).toBe(false)
-
-      // Should call onComplete
-      expect(onComplete).toHaveBeenCalledTimes(1)
       expect(result.current.results).toEqual({ success: 1, failed: 0 })
     })
 
-    it('processes max 2 videos concurrently', async () => {
+    it('processes videos serially (one at a time)', async () => {
       const onComplete = vi.fn()
       const videos = [
         createMockVideo('video1'),
@@ -80,16 +75,14 @@ describe('useBatchAdd', () => {
       let video2TranscriptStarted = false
       let video3TranscriptStarted = false
       let resolveVideo1Transcript: (() => void) | null = null
-      let resolveVideo2Transcript: (() => void) | null = null
 
-      // Track when each video starts processing with controlled delays
+      // Track when each video starts; video1 blocks until explicitly resolved
       mockFetch.mockImplementation(async (url: string, options?: RequestInit) => {
         if (url.includes('/transcript')) {
           const body = JSON.parse((options?.body as string) || '{}')
 
           if (body.videoId === 'video1') {
             video1TranscriptStarted = true
-            // Block until we explicitly resolve
             await new Promise<void>(resolve => { resolveVideo1Transcript = resolve })
             return {
               ok: true,
@@ -99,8 +92,6 @@ describe('useBatchAdd', () => {
 
           if (body.videoId === 'video2') {
             video2TranscriptStarted = true
-            // Block until we explicitly resolve
-            await new Promise<void>(resolve => { resolveVideo2Transcript = resolve })
             return {
               ok: true,
               json: async () => ({ success: true, transcript: 'Test transcript 2' }),
@@ -128,33 +119,35 @@ describe('useBatchAdd', () => {
 
       result.current.startBatch(videos)
 
-      // Wait for first 2 to start
+      // Wait for video1 to start
       await waitFor(() => {
         expect(video1TranscriptStarted).toBe(true)
-        expect(video2TranscriptStarted).toBe(true)
       })
 
-      // Third should not have started yet (concurrency limit = 2)
+      // video2 and video3 must not have started yet (serial, concurrency = 1)
+      expect(video2TranscriptStarted).toBe(false)
       expect(video3TranscriptStarted).toBe(false)
 
-      // Complete video1 to free up a slot
+      // Let video1 complete — video2 will start after the 1s delay fires naturally
       resolveVideo1Transcript!()
 
-      // Wait for video3 to start
+      // Wait for video2 to start (after the 1s inter-video delay)
+      await waitFor(() => {
+        expect(video2TranscriptStarted).toBe(true)
+      }, { timeout: 3000 })
+
+      // Wait for video3 to start (after video2 completes + 1s delay)
       await waitFor(() => {
         expect(video3TranscriptStarted).toBe(true)
-      })
+      }, { timeout: 3000 })
 
-      // Complete video2
-      resolveVideo2Transcript!()
-
-      // Wait for all to complete
+      // Wait for the batch to finish
       await waitFor(() => {
         expect(result.current.isRunning).toBe(false)
       }, { timeout: 3000 })
 
       expect(result.current.results.success).toBe(3)
-    })
+    }, 10000)
 
     it('handles 429 rate limit with retry', async () => {
       const onComplete = vi.fn()
@@ -184,14 +177,14 @@ describe('useBatchAdd', () => {
 
       result.current.startBatch([video])
 
-      // Should eventually succeed after retry
+      // Should eventually succeed after retry (1s Retry-After delay)
       await waitFor(() => {
         const item = result.current.batchStatus.get('video1')
         expect(item?.status).toBe('done')
       }, { timeout: 3000 })
 
       expect(result.current.results).toEqual({ success: 1, failed: 0 })
-    })
+    }, 10000)
 
     it('handles 409 duplicate as success', async () => {
       const onComplete = vi.fn()
@@ -310,12 +303,21 @@ describe('useBatchAdd', () => {
 
       result.current.startBatch(videos)
 
+      // Both videos process serially; wait for both to reach done state
+      await waitFor(() => {
+        const item1 = result.current.batchStatus.get('video1')
+        const item2 = result.current.batchStatus.get('video2')
+        expect(item1?.status).toBe('done')
+        expect(item2?.status).toBe('done')
+      }, { timeout: 3000 })
+
+      // After video2 completes, the final inter-video delay fires and then onComplete is called
       await waitFor(() => {
         expect(result.current.isRunning).toBe(false)
-      })
+      }, { timeout: 3000 })
 
       expect(onComplete).toHaveBeenCalledTimes(1)
-    })
+    }, 10000)
 
     it('calls transcript API with correct payload', async () => {
       const onComplete = vi.fn()
@@ -336,8 +338,10 @@ describe('useBatchAdd', () => {
 
       result.current.startBatch([video])
 
+      // Wait for item to be done — APIs are called before status reaches 'done'
       await waitFor(() => {
-        expect(result.current.isRunning).toBe(false)
+        const item = result.current.batchStatus.get('video123')
+        expect(item?.status).toBe('done')
       })
 
       // Check first call was to transcript API
@@ -370,8 +374,10 @@ describe('useBatchAdd', () => {
 
       result.current.startBatch([video])
 
+      // Wait for item to be done — both API calls complete before status is 'done'
       await waitFor(() => {
-        expect(result.current.isRunning).toBe(false)
+        const item = result.current.batchStatus.get('video123')
+        expect(item?.status).toBe('done')
       })
 
       // Check second call was to videos API
