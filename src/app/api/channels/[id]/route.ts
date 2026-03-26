@@ -1,4 +1,4 @@
-import { db, channels } from '@/lib/db'
+import { db, channels, discoveryVideos } from '@/lib/db'
 import { eq } from 'drizzle-orm'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
@@ -27,18 +27,31 @@ export async function DELETE(
       )
     }
 
-    const channelId = parseInt(id, 10)
+    const channelRowId = parseInt(id, 10)
 
-    // Delete the channel and return the deleted row
-    const deleted = await db
-      .delete(channels)
-      .where(eq(channels.id, channelId))
-      .returning()
+    // Fetch the channel to get its YouTube channelId before deleting
+    const existing = await db
+      .select()
+      .from(channels)
+      .where(eq(channels.id, channelRowId))
 
-    if (!deleted[0]) {
+    if (!existing[0]) {
       timer.end(404)
       return NextResponse.json({ error: 'Channel not found' }, { status: 404 })
     }
+
+    const youtubeChannelId = existing[0].channelId
+
+    // Delete the channel row
+    const deleted = await db
+      .delete(channels)
+      .where(eq(channels.id, channelRowId))
+      .returning()
+
+    // Clean up discovery_videos for this channel using the YouTube channel ID
+    await db
+      .delete(discoveryVideos)
+      .where(eq(discoveryVideos.channelId, youtubeChannelId))
 
     timer.end(200)
     return NextResponse.json({

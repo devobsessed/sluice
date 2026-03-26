@@ -25,6 +25,18 @@ vi.mock('@/lib/db', async () => {
 
 const mockDb = vi.mocked(db)
 
+const mockChannel = {
+  id: 1,
+  channelId: 'UCtest123',
+  name: 'Test Channel',
+  thumbnailUrl: null,
+  createdAt: new Date(),
+  feedUrl: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCtest123',
+  autoFetch: false,
+  lastFetchedAt: null,
+  fetchIntervalHours: 12,
+}
+
 describe('DELETE /api/channels/[id]', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -34,24 +46,25 @@ describe('DELETE /api/channels/[id]', () => {
     vi.restoreAllMocks()
   })
 
-  it('successfully deletes an existing channel', async () => {
-    const mockDeleted = {
-      id: 1,
-      channelId: 'UCtest123',
-      name: 'Test Channel',
-      thumbnailUrl: null,
-      createdAt: new Date(),
-      feedUrl: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCtest123',
-      autoFetch: false,
-      lastFetchedAt: null,
-      fetchIntervalHours: 12,
-    }
-
-    mockDb.delete.mockReturnValue({
-      where: vi.fn().mockReturnValue({
-        returning: vi.fn().mockResolvedValue([mockDeleted]),
+  it('successfully deletes an existing channel and its discovery_videos', async () => {
+    // First call: select to fetch channel row
+    mockDb.select.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([mockChannel]),
       }),
     } as never)
+
+    // First delete call: channels table
+    // Second delete call: discovery_videos table
+    mockDb.delete
+      .mockReturnValueOnce({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([mockChannel]),
+        }),
+      } as never)
+      .mockReturnValueOnce({
+        where: vi.fn().mockResolvedValue(undefined),
+      } as never)
 
     const response = await DELETE(
       new Request('http://localhost/api/channels/1'),
@@ -64,12 +77,79 @@ describe('DELETE /api/channels/[id]', () => {
     expect(data.success).toBe(true)
     expect(data.channel).toBeDefined()
     expect(data.channel.channelId).toBe('UCtest123')
+    // Verify both deletes were called
+    expect(mockDb.delete).toHaveBeenCalledTimes(2)
+  })
+
+  it('cleans up discovery_videos using the YouTube channelId, not the database row id', async () => {
+    const channelWithDifferentIds = {
+      ...mockChannel,
+      id: 42,
+      channelId: 'UCyoutube_channel_id',
+    }
+
+    mockDb.select.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([channelWithDifferentIds]),
+      }),
+    } as never)
+
+    const discoveryDeleteWhereFn = vi.fn().mockResolvedValue(undefined)
+
+    mockDb.delete
+      .mockReturnValueOnce({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([channelWithDifferentIds]),
+        }),
+      } as never)
+      .mockReturnValueOnce({
+        where: discoveryDeleteWhereFn,
+      } as never)
+
+    await DELETE(
+      new Request('http://localhost/api/channels/42'),
+      { params: Promise.resolve({ id: '42' }) }
+    )
+
+    // The second delete (discovery_videos) must have been called
+    expect(mockDb.delete).toHaveBeenCalledTimes(2)
+    expect(discoveryDeleteWhereFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns the deleted channel data', async () => {
+    mockDb.select.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([mockChannel]),
+      }),
+    } as never)
+
+    mockDb.delete
+      .mockReturnValueOnce({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([mockChannel]),
+        }),
+      } as never)
+      .mockReturnValueOnce({
+        where: vi.fn().mockResolvedValue(undefined),
+      } as never)
+
+    const response = await DELETE(
+      new Request('http://localhost/api/channels/1'),
+      { params: Promise.resolve({ id: '1' }) }
+    )
+
+    const data = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(data.channel.id).toBe(1)
+    expect(data.channel.name).toBe('Test Channel')
+    expect(data.channel.channelId).toBe('UCtest123')
   })
 
   it('returns 404 when channel not found', async () => {
-    mockDb.delete.mockReturnValue({
-      where: vi.fn().mockReturnValue({
-        returning: vi.fn().mockResolvedValue([]),
+    mockDb.select.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([]),
       }),
     } as never)
 
@@ -82,6 +162,8 @@ describe('DELETE /api/channels/[id]', () => {
 
     expect(response.status).toBe(404)
     expect(data).toEqual({ error: 'Channel not found' })
+    // Should not attempt any deletes if channel doesn't exist
+    expect(mockDb.delete).not.toHaveBeenCalled()
   })
 
   it('returns 400 for invalid channel ID format', async () => {
@@ -121,9 +203,9 @@ describe('DELETE /api/channels/[id]', () => {
   })
 
   it('returns 500 on database error', async () => {
-    mockDb.delete.mockReturnValue({
-      where: vi.fn().mockReturnValue({
-        returning: vi.fn().mockRejectedValue(new Error('Database error')),
+    mockDb.select.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockRejectedValue(new Error('Database error')),
       }),
     } as never)
 
