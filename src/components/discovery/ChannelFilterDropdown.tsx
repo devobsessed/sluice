@@ -1,6 +1,6 @@
 'use client'
 
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,12 +25,14 @@ interface ChannelFilterDropdownProps {
   channels: Channel[]
   selectedChannelId: string | null
   onChannelChange: (channelId: string | null) => void
+  onUnfollow?: (channelId: number) => void
 }
 
 export function ChannelFilterDropdown({
   channels,
   selectedChannelId,
   onChannelChange,
+  onUnfollow,
 }: ChannelFilterDropdownProps) {
   // Find the selected channel to display its name
   const selectedChannel = channels.find((channel) => channel.channelId === selectedChannelId)
@@ -38,6 +40,16 @@ export function ChannelFilterDropdown({
 
   const handleSelectChannel = (channelId: string | null) => {
     onChannelChange(channelId)
+  }
+
+  const handleUnfollowClick = (e: React.MouseEvent, channel: Channel) => {
+    e.stopPropagation()
+    const confirmed = window.confirm(
+      `Unfollow ${channel.name}? Videos already in your bank will stay.`
+    )
+    if (confirmed) {
+      onUnfollow?.(channel.id)
+    }
   }
 
   return (
@@ -57,8 +69,19 @@ export function ChannelFilterDropdown({
           <DropdownMenuItem
             key={channel.id}
             onClick={() => handleSelectChannel(channel.channelId)}
+            className="flex items-center justify-between px-3 py-2"
           >
-            {channel.name}
+            <span className="truncate">{channel.name}</span>
+            {onUnfollow && (
+              <button
+                type="button"
+                aria-label={`Unfollow ${channel.name}`}
+                onClick={(e) => handleUnfollowClick(e, channel)}
+                className="ml-2 shrink-0 p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X size={14} />
+              </button>
+            )}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
