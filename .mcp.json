@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "sluice": {
+      "type": "url",
+      "url": "http://localhost:3001/api/mcp/mcp"
+    }
+  }
+}
