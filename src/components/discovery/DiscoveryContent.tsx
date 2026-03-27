@@ -131,6 +131,12 @@ export function DiscoveryContent() {
 
   const handleUnfollow = async (channelId: number) => {
     try {
+      // If unfollowing the currently filtered channel, clear the filter
+      const unfollowedChannel = channels.find((ch) => ch.id === channelId)
+      if (unfollowedChannel && unfollowedChannel.channelId === selectedChannelId) {
+        updateParams({ channel: null, page: null })
+      }
+
       const response = await fetch(`/api/channels/${channelId}`, { method: 'DELETE' })
       if (!response.ok) throw new Error('Failed to unfollow')
       await fetchDiscoveryData()

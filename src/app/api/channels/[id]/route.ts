@@ -29,7 +29,7 @@ export async function DELETE(
 
     const channelRowId = parseInt(id, 10)
 
-    // Fetch the channel to get its YouTube channelId before deleting
+    // Fetch the channel first to check existence and get YouTube channelId
     const existing = await db
       .select()
       .from(channels)
@@ -42,21 +42,24 @@ export async function DELETE(
 
     const youtubeChannelId = existing[0].channelId
 
-    // Delete the channel row
-    const deleted = await db
-      .delete(channels)
-      .where(eq(channels.id, channelRowId))
-      .returning()
+    // Atomic delete: channel row + discovery_videos cleanup in a transaction
+    const deleted = await db.transaction(async (tx) => {
+      const [deletedChannel] = await tx
+        .delete(channels)
+        .where(eq(channels.id, channelRowId))
+        .returning()
 
-    // Clean up discovery_videos for this channel using the YouTube channel ID
-    await db
-      .delete(discoveryVideos)
-      .where(eq(discoveryVideos.channelId, youtubeChannelId))
+      await tx
+        .delete(discoveryVideos)
+        .where(eq(discoveryVideos.channelId, youtubeChannelId))
+
+      return deletedChannel
+    })
 
     timer.end(200)
     return NextResponse.json({
       success: true,
-      channel: deleted[0],
+      channel: deleted,
     })
   } catch (error) {
     console.error('Error unfollowing channel:', error)

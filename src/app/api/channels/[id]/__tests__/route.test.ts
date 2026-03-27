@@ -18,6 +18,7 @@ vi.mock('@/lib/db', async () => {
     ...actual,
     db: {
       delete: vi.fn(),
+      transaction: vi.fn(),
       select: vi.fn(),
     },
   }
@@ -47,24 +48,26 @@ describe('DELETE /api/channels/[id]', () => {
   })
 
   it('successfully deletes an existing channel and its discovery_videos', async () => {
-    // First call: select to fetch channel row
+    // Select to fetch channel row
     mockDb.select.mockReturnValue({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockResolvedValue([mockChannel]),
       }),
     } as never)
 
-    // First delete call: channels table
-    // Second delete call: discovery_videos table
-    mockDb.delete
-      .mockReturnValueOnce({
-        where: vi.fn().mockReturnValue({
-          returning: vi.fn().mockResolvedValue([mockChannel]),
-        }),
-      } as never)
-      .mockReturnValueOnce({
-        where: vi.fn().mockResolvedValue(undefined),
-      } as never)
+    // Transaction mock: callback receives tx with delete method
+    mockDb.transaction.mockImplementation(async (cb: (tx: unknown) => Promise<unknown>) => {
+      const txDelete = vi.fn()
+        .mockReturnValueOnce({
+          where: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([mockChannel]),
+          }),
+        })
+        .mockReturnValueOnce({
+          where: vi.fn().mockResolvedValue(undefined),
+        })
+      return cb({ delete: txDelete })
+    })
 
     const response = await DELETE(
       new Request('http://localhost/api/channels/1'),
@@ -77,8 +80,7 @@ describe('DELETE /api/channels/[id]', () => {
     expect(data.success).toBe(true)
     expect(data.channel).toBeDefined()
     expect(data.channel.channelId).toBe('UCtest123')
-    // Verify both deletes were called
-    expect(mockDb.delete).toHaveBeenCalledTimes(2)
+    expect(mockDb.transaction).toHaveBeenCalledTimes(1)
   })
 
   it('cleans up discovery_videos using the YouTube channelId, not the database row id', async () => {
@@ -96,23 +98,25 @@ describe('DELETE /api/channels/[id]', () => {
 
     const discoveryDeleteWhereFn = vi.fn().mockResolvedValue(undefined)
 
-    mockDb.delete
-      .mockReturnValueOnce({
-        where: vi.fn().mockReturnValue({
-          returning: vi.fn().mockResolvedValue([channelWithDifferentIds]),
-        }),
-      } as never)
-      .mockReturnValueOnce({
-        where: discoveryDeleteWhereFn,
-      } as never)
+    mockDb.transaction.mockImplementation(async (cb: (tx: unknown) => Promise<unknown>) => {
+      const txDelete = vi.fn()
+        .mockReturnValueOnce({
+          where: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([channelWithDifferentIds]),
+          }),
+        })
+        .mockReturnValueOnce({
+          where: discoveryDeleteWhereFn,
+        })
+      return cb({ delete: txDelete })
+    })
 
     await DELETE(
       new Request('http://localhost/api/channels/42'),
       { params: Promise.resolve({ id: '42' }) }
     )
 
-    // The second delete (discovery_videos) must have been called
-    expect(mockDb.delete).toHaveBeenCalledTimes(2)
+    expect(mockDb.transaction).toHaveBeenCalledTimes(1)
     expect(discoveryDeleteWhereFn).toHaveBeenCalledTimes(1)
   })
 
@@ -123,15 +127,18 @@ describe('DELETE /api/channels/[id]', () => {
       }),
     } as never)
 
-    mockDb.delete
-      .mockReturnValueOnce({
-        where: vi.fn().mockReturnValue({
-          returning: vi.fn().mockResolvedValue([mockChannel]),
-        }),
-      } as never)
-      .mockReturnValueOnce({
-        where: vi.fn().mockResolvedValue(undefined),
-      } as never)
+    mockDb.transaction.mockImplementation(async (cb: (tx: unknown) => Promise<unknown>) => {
+      const txDelete = vi.fn()
+        .mockReturnValueOnce({
+          where: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([mockChannel]),
+          }),
+        })
+        .mockReturnValueOnce({
+          where: vi.fn().mockResolvedValue(undefined),
+        })
+      return cb({ delete: txDelete })
+    })
 
     const response = await DELETE(
       new Request('http://localhost/api/channels/1'),
