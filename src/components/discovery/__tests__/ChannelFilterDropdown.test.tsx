@@ -177,7 +177,7 @@ describe('ChannelFilterDropdown', () => {
       await user.click(screen.getByText('All Channels'))
 
       // One X button per channel (3), none for "All Channels" item
-      const xButtons = screen.getAllByRole('button', { name: /unfollow/i })
+      const xButtons = screen.getAllByRole('menuitem', { name: /unfollow/i })
       expect(xButtons).toHaveLength(3)
     })
 
@@ -194,7 +194,7 @@ describe('ChannelFilterDropdown', () => {
 
       await user.click(screen.getByText('All Channels'))
 
-      const xButtons = screen.queryAllByRole('button', { name: /unfollow/i })
+      const xButtons = screen.queryAllByRole('menuitem', { name: /unfollow/i })
       expect(xButtons).toHaveLength(0)
     })
 
@@ -215,7 +215,7 @@ describe('ChannelFilterDropdown', () => {
 
       await user.click(screen.getByText('All Channels'))
 
-      const [firstXButton] = screen.getAllByRole('button', { name: /unfollow fireship/i })
+      const [firstXButton] = screen.getAllByRole('menuitem', { name: /unfollow fireship/i })
       await user.click(firstXButton!)
 
       expect(window.confirm).toHaveBeenCalledWith(
@@ -242,7 +242,7 @@ describe('ChannelFilterDropdown', () => {
 
       await user.click(screen.getByText('All Channels'))
 
-      const [firstXButton] = screen.getAllByRole('button', { name: /unfollow/i })
+      const [firstXButton] = screen.getAllByRole('menuitem', { name: /unfollow/i })
       await user.click(firstXButton!)
 
       expect(onUnfollow).not.toHaveBeenCalled()
@@ -265,7 +265,7 @@ describe('ChannelFilterDropdown', () => {
 
       await user.click(screen.getByText('All Channels'))
 
-      const [firstXButton] = screen.getAllByRole('button', { name: /unfollow fireship/i })
+      const [firstXButton] = screen.getAllByRole('menuitem', { name: /unfollow fireship/i })
       await user.click(firstXButton!)
 
       expect(onChannelChange).not.toHaveBeenCalled()

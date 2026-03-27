@@ -99,7 +99,7 @@ describe('DiscoveryContent', () => {
       await user.click(screen.getByText('All Channels'))
 
       // Click the unfollow X button for Fireship
-      const xButton = await screen.findByRole('button', { name: /unfollow fireship/i })
+      const xButton = await screen.findByRole('menuitem', { name: /unfollow fireship/i })
       await user.click(xButton)
 
       // Verify DELETE was called with correct channel id
@@ -136,7 +136,7 @@ describe('DiscoveryContent', () => {
       // Open the channel filter dropdown
       await user.click(screen.getByText('All Channels'))
 
-      const xButton = await screen.findByRole('button', { name: /unfollow fireship/i })
+      const xButton = await screen.findByRole('menuitem', { name: /unfollow fireship/i })
       await user.click(xButton)
 
       // After refresh with empty channels, empty state should render

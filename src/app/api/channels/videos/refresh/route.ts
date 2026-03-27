@@ -1,15 +1,11 @@
 import { NextResponse } from 'next/server'
 import { refreshDiscoveryVideos } from '@/lib/automation/rss'
 import { startApiTimer } from '@/lib/api-timing'
-import { auth } from '@/lib/auth'
-import { headers } from 'next/headers'
+import { requireSession } from '@/lib/auth-guards'
 
 export async function POST(_request: Request): Promise<NextResponse> {
-  // Require authenticated session
-  const session = await auth.api.getSession({ headers: await headers() })
-  if (!session) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const denied = await requireSession()
+  if (denied) return denied
 
   const timer = startApiTimer('/api/channels/videos/refresh', 'POST')
   try {

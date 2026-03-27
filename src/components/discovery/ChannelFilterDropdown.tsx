@@ -66,23 +66,27 @@ export function ChannelFilterDropdown({
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {channels.map((channel) => (
-          <DropdownMenuItem
-            key={channel.id}
-            onClick={() => handleSelectChannel(channel.channelId)}
-            className="flex items-center justify-between px-3 py-2"
-          >
-            <span className="truncate">{channel.name}</span>
+          <div key={channel.id} className="flex items-center">
+            <DropdownMenuItem
+              onClick={() => handleSelectChannel(channel.channelId)}
+              className="flex-1 truncate px-3 py-2"
+            >
+              {channel.name}
+            </DropdownMenuItem>
             {onUnfollow && (
-              <button
-                type="button"
+              <DropdownMenuItem
+                variant="destructive"
                 aria-label={`Unfollow ${channel.name}`}
-                onClick={(e) => handleUnfollowClick(e, channel)}
-                className="ml-2 shrink-0 p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                onClick={(e) => {
+                  e.preventDefault()
+                  handleUnfollowClick(e, channel)
+                }}
+                className="shrink-0 px-2 py-2"
               >
                 <X size={14} />
-              </button>
+              </DropdownMenuItem>
             )}
-          </DropdownMenuItem>
+          </div>
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
