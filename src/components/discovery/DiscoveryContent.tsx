@@ -129,6 +129,22 @@ export function DiscoveryContent() {
     fetchDiscoveryData()
   }, [fetchDiscoveryData])
 
+  const handleUnfollow = async (channelId: number) => {
+    try {
+      // If unfollowing the currently filtered channel, clear the filter
+      const unfollowedChannel = channels.find((ch) => ch.id === channelId)
+      if (unfollowedChannel && unfollowedChannel.channelId === selectedChannelId) {
+        updateParams({ channel: null, page: null })
+      }
+
+      const response = await fetch(`/api/channels/${channelId}`, { method: 'DELETE' })
+      if (!response.ok) throw new Error('Failed to unfollow')
+      await fetchDiscoveryData()
+    } catch {
+      // Non-fatal: UI remains unchanged if the request fails
+    }
+  }
+
   const handleChannelFollowed = async (newChannel: Channel) => {
     setChannels((prev) => [newChannel, ...prev])
     // Refresh RSS cache then re-fetch all discovery data so new channel videos appear immediately
@@ -260,6 +276,7 @@ export function DiscoveryContent() {
               channels={channels}
               selectedChannelId={selectedChannelId}
               onChannelChange={handleChannelChange}
+              onUnfollow={handleUnfollow}
             />
             <ContentTypeFilter selected={contentType} onChange={handleContentTypeChange} />
             <Button

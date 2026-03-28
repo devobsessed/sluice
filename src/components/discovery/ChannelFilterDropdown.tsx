@@ -1,6 +1,6 @@
 'use client'
 
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,12 +25,14 @@ interface ChannelFilterDropdownProps {
   channels: Channel[]
   selectedChannelId: string | null
   onChannelChange: (channelId: string | null) => void
+  onUnfollow?: (channelId: number) => void
 }
 
 export function ChannelFilterDropdown({
   channels,
   selectedChannelId,
   onChannelChange,
+  onUnfollow,
 }: ChannelFilterDropdownProps) {
   // Find the selected channel to display its name
   const selectedChannel = channels.find((channel) => channel.channelId === selectedChannelId)
@@ -38,6 +40,16 @@ export function ChannelFilterDropdown({
 
   const handleSelectChannel = (channelId: string | null) => {
     onChannelChange(channelId)
+  }
+
+  const handleUnfollowClick = (e: React.MouseEvent, channel: Channel) => {
+    e.stopPropagation()
+    const confirmed = window.confirm(
+      `Unfollow ${channel.name}? Videos already in your bank will stay.`
+    )
+    if (confirmed) {
+      onUnfollow?.(channel.id)
+    }
   }
 
   return (
@@ -54,12 +66,27 @@ export function ChannelFilterDropdown({
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {channels.map((channel) => (
-          <DropdownMenuItem
-            key={channel.id}
-            onClick={() => handleSelectChannel(channel.channelId)}
-          >
-            {channel.name}
-          </DropdownMenuItem>
+          <div key={channel.id} className="flex items-center">
+            <DropdownMenuItem
+              onClick={() => handleSelectChannel(channel.channelId)}
+              className="flex-1 truncate px-3 py-2"
+            >
+              {channel.name}
+            </DropdownMenuItem>
+            {onUnfollow && (
+              <DropdownMenuItem
+                variant="destructive"
+                aria-label={`Unfollow ${channel.name}`}
+                onClick={(e) => {
+                  e.preventDefault()
+                  handleUnfollowClick(e, channel)
+                }}
+                className="shrink-0 px-2 py-2"
+              >
+                <X size={14} />
+              </DropdownMenuItem>
+            )}
+          </div>
         ))}
       </DropdownMenuContent>
     </DropdownMenu>

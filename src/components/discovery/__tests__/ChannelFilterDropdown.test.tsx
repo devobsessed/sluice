@@ -159,4 +159,116 @@ describe('ChannelFilterDropdown', () => {
     const icon = container.querySelector('svg')
     expect(icon).toBeInTheDocument()
   })
+
+  describe('unfollow X button', () => {
+    it('renders an X button for each channel in the open menu', async () => {
+      const user = userEvent.setup()
+      const onChannelChange = vi.fn()
+      const onUnfollow = vi.fn()
+      render(
+        <ChannelFilterDropdown
+          channels={mockChannels}
+          selectedChannelId={null}
+          onChannelChange={onChannelChange}
+          onUnfollow={onUnfollow}
+        />
+      )
+
+      await user.click(screen.getByText('All Channels'))
+
+      // One X button per channel (3), none for "All Channels" item
+      const xButtons = screen.getAllByRole('menuitem', { name: /unfollow/i })
+      expect(xButtons).toHaveLength(3)
+    })
+
+    it('does not render X buttons when onUnfollow prop is not provided', async () => {
+      const user = userEvent.setup()
+      const onChannelChange = vi.fn()
+      render(
+        <ChannelFilterDropdown
+          channels={mockChannels}
+          selectedChannelId={null}
+          onChannelChange={onChannelChange}
+        />
+      )
+
+      await user.click(screen.getByText('All Channels'))
+
+      const xButtons = screen.queryAllByRole('menuitem', { name: /unfollow/i })
+      expect(xButtons).toHaveLength(0)
+    })
+
+    it('shows confirm dialog and calls onUnfollow with channel id when confirmed', async () => {
+      const user = userEvent.setup()
+      const onChannelChange = vi.fn()
+      const onUnfollow = vi.fn()
+      vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+      render(
+        <ChannelFilterDropdown
+          channels={mockChannels}
+          selectedChannelId={null}
+          onChannelChange={onChannelChange}
+          onUnfollow={onUnfollow}
+        />
+      )
+
+      await user.click(screen.getByText('All Channels'))
+
+      const [firstXButton] = screen.getAllByRole('menuitem', { name: /unfollow fireship/i })
+      await user.click(firstXButton!)
+
+      expect(window.confirm).toHaveBeenCalledWith(
+        'Unfollow Fireship? Videos already in your bank will stay.'
+      )
+      expect(onUnfollow).toHaveBeenCalledWith(1)
+      expect(onUnfollow).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not call onUnfollow when confirm dialog is cancelled', async () => {
+      const user = userEvent.setup()
+      const onChannelChange = vi.fn()
+      const onUnfollow = vi.fn()
+      vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+      render(
+        <ChannelFilterDropdown
+          channels={mockChannels}
+          selectedChannelId={null}
+          onChannelChange={onChannelChange}
+          onUnfollow={onUnfollow}
+        />
+      )
+
+      await user.click(screen.getByText('All Channels'))
+
+      const [firstXButton] = screen.getAllByRole('menuitem', { name: /unfollow/i })
+      await user.click(firstXButton!)
+
+      expect(onUnfollow).not.toHaveBeenCalled()
+    })
+
+    it('clicking X button does not trigger channel selection', async () => {
+      const user = userEvent.setup()
+      const onChannelChange = vi.fn()
+      const onUnfollow = vi.fn()
+      vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+      render(
+        <ChannelFilterDropdown
+          channels={mockChannels}
+          selectedChannelId={null}
+          onChannelChange={onChannelChange}
+          onUnfollow={onUnfollow}
+        />
+      )
+
+      await user.click(screen.getByText('All Channels'))
+
+      const [firstXButton] = screen.getAllByRole('menuitem', { name: /unfollow fireship/i })
+      await user.click(firstXButton!)
+
+      expect(onChannelChange).not.toHaveBeenCalled()
+    })
+  })
 })
