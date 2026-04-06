@@ -1,5 +1,7 @@
 import { timingSafeEqual } from 'crypto'
 import { NextResponse } from 'next/server'
+import { createRemoteJWKSet, jwtVerify } from 'jose'
+import type { JWTPayload } from 'jose'
 import { auth } from '@/lib/auth'
 import { headers } from 'next/headers'
 
@@ -86,4 +88,69 @@ export async function requireSession(): Promise<NextResponse | null> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   return null
+}
+
+type ExternalJwtConfig = {
+  jwksUrl: string
+  issuer?: string
+  audience?: string
+}
+
+type ExternalJwtResult =
+  | { valid: true; payload: JWTPayload }
+  | { valid: false }
+
+let cachedJwksResolver: ReturnType<typeof createRemoteJWKSet> | null = null
+let cachedJwksUrl: string | null = null
+
+function getJwksResolver(jwksUrl: string): ReturnType<typeof createRemoteJWKSet> {
+  if (cachedJwksResolver && cachedJwksUrl === jwksUrl) {
+    return cachedJwksResolver
+  }
+  cachedJwksResolver = createRemoteJWKSet(new URL(jwksUrl))
+  cachedJwksUrl = jwksUrl
+  return cachedJwksResolver
+}
+
+/**
+ * Verify a JWT against a remote JWKS endpoint with optional issuer and audience validation.
+ *
+ * Returns `{ valid: true, payload }` on success.
+ * Returns `{ valid: false }` when JWKS URL is absent, token is null, or verification fails.
+ * Never throws.
+ *
+ * Config values fall back to MCP_JWKS_URL, MCP_JWT_ISSUER, MCP_JWT_AUDIENCE env vars when
+ * not provided explicitly.
+ */
+export async function verifyExternalJwt(
+  token: string | null,
+  config?: ExternalJwtConfig,
+): Promise<ExternalJwtResult> {
+  const jwksUrl = config?.jwksUrl ?? process.env.MCP_JWKS_URL
+  if (!jwksUrl || !token) {
+    return { valid: false }
+  }
+
+  const issuer = config?.issuer ?? process.env.MCP_JWT_ISSUER
+  const audience = config?.audience ?? process.env.MCP_JWT_AUDIENCE
+
+  try {
+    const jwks = getJwksResolver(jwksUrl)
+    const { payload } = await jwtVerify(token, jwks, {
+      ...(issuer ? { issuer } : {}),
+      ...(audience ? { audience } : {}),
+    })
+    return { valid: true, payload }
+  } catch {
+    return { valid: false }
+  }
+}
+
+/**
+ * Reset the JWKS resolver cache.
+ * Exported for testing only — do not use in production code.
+ */
+export function _resetJwksCache(): void {
+  cachedJwksResolver = null
+  cachedJwksUrl = null
 }

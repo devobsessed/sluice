@@ -29,6 +29,10 @@ if (!process.env.BETTER_AUTH_SECRET) {
   console.warn('Warning: BETTER_AUTH_SECRET not set. Auth will use an insecure default in development.')
 }
 
+if (process.env.MCP_JWKS_URL && !process.env.MCP_JWT_ISSUER) {
+  console.warn('Warning: MCP_JWKS_URL is set but MCP_JWT_ISSUER is not. External MCP JWT verification will not enforce issuer.')
+}
+
 // Note: NEXT_PUBLIC_AGENT_PORT is not validated -- it has a sensible default
 
 export {}
