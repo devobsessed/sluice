@@ -90,67 +90,111 @@ export async function requireSession(): Promise<NextResponse | null> {
   return null
 }
 
-type ExternalJwtConfig = {
+type ExternalAuthProvider = {
+  name: string
   jwksUrl: string
   issuer?: string
-  audience?: string
+  audience: string
 }
 
 type ExternalJwtResult =
-  | { valid: true; payload: JWTPayload }
+  | { valid: true; payload: JWTPayload; provider: string }
   | { valid: false }
 
-let cachedJwksResolver: ReturnType<typeof createRemoteJWKSet> | null = null
-let cachedJwksUrl: string | null = null
+const jwksResolverCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>()
 
 function getJwksResolver(jwksUrl: string): ReturnType<typeof createRemoteJWKSet> {
-  if (cachedJwksResolver && cachedJwksUrl === jwksUrl) {
-    return cachedJwksResolver
+  const cached = jwksResolverCache.get(jwksUrl)
+  if (cached) return cached
+  const resolver = createRemoteJWKSet(new URL(jwksUrl))
+  jwksResolverCache.set(jwksUrl, resolver)
+  return resolver
+}
+
+function getExternalAuthProviders(): ExternalAuthProvider[] {
+  const raw = process.env.MCP_EXTERNAL_AUTH_PROVIDERS
+  if (!raw) return []
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    console.error('MCP_EXTERNAL_AUTH_PROVIDERS is not valid JSON - external JWT auth disabled')
+    return []
   }
-  cachedJwksResolver = createRemoteJWKSet(new URL(jwksUrl))
-  cachedJwksUrl = jwksUrl
-  return cachedJwksResolver
+
+  if (!Array.isArray(parsed)) {
+    console.error('MCP_EXTERNAL_AUTH_PROVIDERS must be a JSON array - external JWT auth disabled')
+    return []
+  }
+
+  const valid: ExternalAuthProvider[] = []
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== 'object') {
+      console.error('MCP_EXTERNAL_AUTH_PROVIDERS: skipping non-object entry')
+      continue
+    }
+    const { name, jwksUrl, issuer, audience } = entry as Record<string, unknown>
+    if (typeof name !== 'string' || !name) {
+      console.error('MCP_EXTERNAL_AUTH_PROVIDERS: skipping entry missing "name"')
+      continue
+    }
+    if (typeof jwksUrl !== 'string' || !jwksUrl) {
+      console.error(`MCP_EXTERNAL_AUTH_PROVIDERS: skipping provider "${name}" - missing "jwksUrl"`)
+      continue
+    }
+    if (typeof audience !== 'string' || !audience) {
+      console.error(`MCP_EXTERNAL_AUTH_PROVIDERS: skipping provider "${name}" - missing "audience" (required for security)`)
+      continue
+    }
+    valid.push({
+      name,
+      jwksUrl,
+      issuer: typeof issuer === 'string' && issuer ? issuer : undefined,
+      audience,
+    })
+  }
+
+  return valid
 }
 
 /**
- * Verify a JWT against a remote JWKS endpoint with optional issuer and audience validation.
+ * Verify a JWT against configured external auth providers (MCP_EXTERNAL_AUTH_PROVIDERS).
  *
- * Returns `{ valid: true, payload }` on success.
- * Returns `{ valid: false }` when JWKS URL is absent, token is null, or verification fails.
+ * Iterates all configured providers in order, returning on the first successful verification.
+ * Returns `{ valid: true, payload, provider }` on success, including the matching provider name.
+ * Returns `{ valid: false }` when no providers are configured, token is null, or all providers reject.
  * Never throws.
- *
- * Config values fall back to MCP_JWKS_URL, MCP_JWT_ISSUER, MCP_JWT_AUDIENCE env vars when
- * not provided explicitly.
  */
 export async function verifyExternalJwt(
   token: string | null,
-  config?: ExternalJwtConfig,
 ): Promise<ExternalJwtResult> {
-  const jwksUrl = config?.jwksUrl ?? process.env.MCP_JWKS_URL
-  if (!jwksUrl || !token) {
-    return { valid: false }
+  if (!token) return { valid: false }
+
+  const providers = getExternalAuthProviders()
+  if (providers.length === 0) return { valid: false }
+
+  for (const provider of providers) {
+    try {
+      const jwks = getJwksResolver(provider.jwksUrl)
+      const { payload } = await jwtVerify(token, jwks, {
+        ...(provider.issuer ? { issuer: provider.issuer } : {}),
+        audience: provider.audience,
+      })
+      return { valid: true, payload, provider: provider.name }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.debug(`External JWT rejected by provider "${provider.name}": ${message}`)
+    }
   }
 
-  const issuer = config?.issuer ?? process.env.MCP_JWT_ISSUER
-  const audience = config?.audience ?? process.env.MCP_JWT_AUDIENCE
-
-  try {
-    const jwks = getJwksResolver(jwksUrl)
-    const { payload } = await jwtVerify(token, jwks, {
-      ...(issuer ? { issuer } : {}),
-      ...(audience ? { audience } : {}),
-    })
-    return { valid: true, payload }
-  } catch {
-    return { valid: false }
-  }
+  return { valid: false }
 }
 
 /**
  * Reset the JWKS resolver cache.
- * Exported for testing only — do not use in production code.
+ * Exported for testing only - do not use in production code.
  */
 export function _resetJwksCache(): void {
-  cachedJwksResolver = null
-  cachedJwksUrl = null
+  jwksResolverCache.clear()
 }

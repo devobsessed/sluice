@@ -29,8 +29,25 @@ if (!process.env.BETTER_AUTH_SECRET) {
   console.warn('Warning: BETTER_AUTH_SECRET not set. Auth will use an insecure default in development.')
 }
 
-if (process.env.MCP_JWKS_URL && !process.env.MCP_JWT_ISSUER) {
-  console.warn('Warning: MCP_JWKS_URL is set but MCP_JWT_ISSUER is not. External MCP JWT verification will not enforce issuer.')
+if (process.env.MCP_EXTERNAL_AUTH_PROVIDERS) {
+  try {
+    const providers = JSON.parse(process.env.MCP_EXTERNAL_AUTH_PROVIDERS)
+    if (!Array.isArray(providers)) {
+      console.error('Warning: MCP_EXTERNAL_AUTH_PROVIDERS is not a JSON array. External MCP JWT auth will not work.')
+    } else {
+      const invalid = providers.filter(
+        (p: Record<string, unknown>) => !p?.audience || !p?.jwksUrl || !p?.name
+      )
+      if (invalid.length > 0) {
+        console.error(
+          `Warning: ${invalid.length} MCP_EXTERNAL_AUTH_PROVIDERS entries are missing required fields (name, jwksUrl, audience). They will be skipped.`
+        )
+      }
+      console.log(`MCP external auth: ${providers.length - invalid.length} provider(s) configured.`)
+    }
+  } catch {
+    console.error('Warning: MCP_EXTERNAL_AUTH_PROVIDERS is not valid JSON. External MCP JWT auth will not work.')
+  }
 }
 
 // Note: NEXT_PUBLIC_AGENT_PORT is not validated -- it has a sensible default
