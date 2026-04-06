@@ -152,6 +152,17 @@ describe('verifyExternalJwt', () => {
       )
       consoleSpy.mockRestore()
     })
+
+    it('skips providers with invalid jwksUrl format', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      setProviders([{ name: 'bad-url', jwksUrl: 'not-a-url', audience: 'test' }])
+      const result = await verifyExternalJwt('some-token')
+      expect(result.valid).toBe(false)
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('invalid "jwksUrl"')
+      )
+      consoleSpy.mockRestore()
+    })
   })
 
   describe('single provider - success', () => {
@@ -214,7 +225,7 @@ describe('verifyExternalJwt', () => {
   })
 
   describe('single provider - failure', () => {
-    it('returns valid: false and logs debug on verification failure', async () => {
+    it('returns valid: false and logs batched debug on verification failure', async () => {
       const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
       setProviders([CLERK_PROVIDER])
       mockJwtVerify.mockRejectedValueOnce(new Error('JWS Invalid Signature'))
@@ -222,6 +233,10 @@ describe('verifyExternalJwt', () => {
       const result = await verifyExternalJwt('bad.token')
 
       expect(result.valid).toBe(false)
+      expect(debugSpy).toHaveBeenCalledOnce()
+      expect(debugSpy).toHaveBeenCalledWith(
+        expect.stringContaining('rejected by all providers')
+      )
       expect(debugSpy).toHaveBeenCalledWith(
         expect.stringContaining('clerk')
       )
@@ -253,14 +268,12 @@ describe('verifyExternalJwt', () => {
         expect(result.provider).toBe('auth0')
         expect(result.payload.sub).toBe('user_from_auth0')
       }
-      // Debug log for the first provider's rejection
-      expect(debugSpy).toHaveBeenCalledWith(
-        expect.stringContaining('clerk')
-      )
+      // No debug log when a provider eventually succeeds
+      expect(debugSpy).not.toHaveBeenCalled()
       debugSpy.mockRestore()
     })
 
-    it('returns valid: false when all providers reject', async () => {
+    it('returns valid: false and logs single batched debug when all providers reject', async () => {
       const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
       setProviders([CLERK_PROVIDER, AUTH0_PROVIDER])
 
@@ -270,7 +283,16 @@ describe('verifyExternalJwt', () => {
       const result = await verifyExternalJwt('rejected.everywhere')
 
       expect(result.valid).toBe(false)
-      expect(debugSpy).toHaveBeenCalledTimes(2)
+      expect(debugSpy).toHaveBeenCalledOnce()
+      expect(debugSpy).toHaveBeenCalledWith(
+        expect.stringContaining('rejected by all providers')
+      )
+      expect(debugSpy).toHaveBeenCalledWith(
+        expect.stringContaining('clerk')
+      )
+      expect(debugSpy).toHaveBeenCalledWith(
+        expect.stringContaining('auth0')
+      )
       debugSpy.mockRestore()
     })
 

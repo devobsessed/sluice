@@ -143,6 +143,12 @@ function getExternalAuthProviders(): ExternalAuthProvider[] {
       console.error(`MCP_EXTERNAL_AUTH_PROVIDERS: skipping provider "${name}" - missing "jwksUrl"`)
       continue
     }
+    try {
+      new URL(jwksUrl)
+    } catch {
+      console.error(`MCP_EXTERNAL_AUTH_PROVIDERS: skipping provider "${name}" - invalid "jwksUrl"`)
+      continue
+    }
     if (typeof audience !== 'string' || !audience) {
       console.error(`MCP_EXTERNAL_AUTH_PROVIDERS: skipping provider "${name}" - missing "audience" (required for security)`)
       continue
@@ -174,6 +180,7 @@ export async function verifyExternalJwt(
   const providers = getExternalAuthProviders()
   if (providers.length === 0) return { valid: false }
 
+  const failures: string[] = []
   for (const provider of providers) {
     try {
       const jwks = getJwksResolver(provider.jwksUrl)
@@ -184,8 +191,12 @@ export async function verifyExternalJwt(
       return { valid: true, payload, provider: provider.name }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      console.debug(`External JWT rejected by provider "${provider.name}": ${message}`)
+      failures.push(`provider "${provider.name}": ${message}`)
     }
+  }
+
+  if (failures.length > 0) {
+    console.debug(`External JWT rejected by all providers: ${failures.join('; ')}`)
   }
 
   return { valid: false }
