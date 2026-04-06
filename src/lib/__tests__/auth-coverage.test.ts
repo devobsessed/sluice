@@ -22,6 +22,7 @@ describe('API route auth coverage', () => {
     'safeCompare',         // Agent token-based auth
     'getMcpSession',       // MCP OAuth auth (legacy — replaced by verifyAccessToken)
     'verifyAccessToken',   // MCP OAuth2 access token verification (@better-auth/oauth-provider)
+    'verifyExternalJwt',   // MCP external JWKS verification (machine-to-machine)
     'getSession',          // Inline session check (legacy routes not yet migrated)
   ]
 

@@ -2,6 +2,7 @@ import { createMcpHandler } from 'mcp-handler'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { registerSearchRag, registerGetListOfCreators, registerChatWithPersona, registerEnsembleQuery } from '@/lib/mcp/tools'
 import { verifyAccessToken } from 'better-auth/oauth2'
+import { verifyExternalJwt } from '@/lib/auth-guards'
 
 /**
  * MCP Route Handler for Gold Miner
@@ -52,7 +53,9 @@ const handler = createMcpHandler(
  * MCP protocol requires both methods to be available
  */
 async function wrappedHandler(request: Request): Promise<Response> {
-  // In production, verify OAuth access token via better-auth/oauth2
+  // In production, verify auth via one of two paths:
+  // 1. External JWKS (machine-to-machine) - tried first when MCP_JWKS_URL is configured
+  // 2. Better Auth OAuth (browser-based MCP clients) - tried second as fallback
   // In development, skip auth so local MCP tools work without OAuth setup
   if (process.env.NODE_ENV === 'production') {
     const authUrl = process.env.BETTER_AUTH_URL ?? ''
@@ -71,23 +74,29 @@ async function wrappedHandler(request: Request): Promise<Response> {
       })
     }
 
-    try {
-      await verifyAccessToken(accessToken, {
-        verifyOptions: {
-          issuer: `${authUrl}/api/auth`,
-          audience: [authUrl, `${authUrl}/`],
-        },
-        jwksUrl: `${authUrl}/api/auth/jwks`,
-      })
-    } catch {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: {
-          'Content-Type': 'application/json',
-          'WWW-Authenticate': `Bearer resource_metadata="${authUrl}/.well-known/oauth-protected-resource"`,
-        },
-      })
+    // Path 1: Try external JWKS verification (machine-to-machine tokens)
+    const externalResult = await verifyExternalJwt(accessToken)
+    if (!externalResult.valid) {
+      // Path 2: Fall back to better-auth OAuth verification (browser tokens)
+      try {
+        await verifyAccessToken(accessToken, {
+          verifyOptions: {
+            issuer: `${authUrl}/api/auth`,
+            audience: [authUrl, `${authUrl}/`],
+          },
+          jwksUrl: `${authUrl}/api/auth/jwks`,
+        })
+      } catch {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401,
+          headers: {
+            'Content-Type': 'application/json',
+            'WWW-Authenticate': `Bearer resource_metadata="${authUrl}/.well-known/oauth-protected-resource"`,
+          },
+        })
+      }
     }
+    // If we reach here, one of the two auth paths succeeded
   }
 
   // MCP handler requires Accept header for streamable HTTP transport
