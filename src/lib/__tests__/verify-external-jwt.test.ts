@@ -38,14 +38,33 @@ import { verifyExternalJwt, _resetJwksCache } from '../auth-guards'
 const mockCreateRemoteJWKSet = vi.mocked(createRemoteJWKSet)
 const mockJwtVerify = vi.mocked(jwtVerify)
 
+// Helper to set MCP_EXTERNAL_AUTH_PROVIDERS env var
+function setProviders(providers: Array<Record<string, unknown>>): void {
+  process.env.MCP_EXTERNAL_AUTH_PROVIDERS = JSON.stringify(providers)
+}
+
+const CLERK_PROVIDER = {
+  name: 'clerk',
+  jwksUrl: 'https://clerk.example.dev/.well-known/jwks.json',
+  issuer: 'https://clerk.example.dev',
+  audience: 'sluice-mcp',
+}
+
+const AUTH0_PROVIDER = {
+  name: 'auth0',
+  jwksUrl: 'https://auth0.example.com/.well-known/jwks.json',
+  issuer: 'https://auth0.example.com/',
+  audience: 'sluice-mcp-api',
+}
+
 describe('verifyExternalJwt', () => {
   const originalEnv = process.env
 
   beforeEach(() => {
     process.env = { ...originalEnv }
+    delete process.env.MCP_EXTERNAL_AUTH_PROVIDERS
     _resetJwksCache()
     vi.clearAllMocks()
-    // Restore createRemoteJWKSet to return a new mock function each time by default
     mockCreateRemoteJWKSet.mockImplementation(
       () => vi.fn() as unknown as ReturnType<typeof createRemoteJWKSet>,
     )
@@ -55,254 +74,283 @@ describe('verifyExternalJwt', () => {
     process.env = originalEnv
   })
 
-  describe('when no JWKS URL is configured', () => {
-    it('returns valid: false when neither config nor env var has jwksUrl', async () => {
-      delete process.env.MCP_JWKS_URL
-
+  describe('when no providers are configured', () => {
+    it('returns valid: false when MCP_EXTERNAL_AUTH_PROVIDERS is not set', async () => {
       const result = await verifyExternalJwt('some-token')
-
       expect(result.valid).toBe(false)
       expect(mockJwtVerify).not.toHaveBeenCalled()
     })
 
-    it('returns valid: false when config jwksUrl is empty string', async () => {
-      delete process.env.MCP_JWKS_URL
-
-      const result = await verifyExternalJwt('some-token', { jwksUrl: '' })
-
+    it('returns valid: false when env var is empty string', async () => {
+      process.env.MCP_EXTERNAL_AUTH_PROVIDERS = ''
+      const result = await verifyExternalJwt('some-token')
       expect(result.valid).toBe(false)
-      expect(mockJwtVerify).not.toHaveBeenCalled()
+    })
+
+    it('returns valid: false and logs error when env var is invalid JSON', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      process.env.MCP_EXTERNAL_AUTH_PROVIDERS = 'not-json'
+      const result = await verifyExternalJwt('some-token')
+      expect(result.valid).toBe(false)
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('not valid JSON')
+      )
+      consoleSpy.mockRestore()
+    })
+
+    it('returns valid: false when env var is not an array', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      process.env.MCP_EXTERNAL_AUTH_PROVIDERS = '{"name": "clerk"}'
+      const result = await verifyExternalJwt('some-token')
+      expect(result.valid).toBe(false)
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('must be a JSON array')
+      )
+      consoleSpy.mockRestore()
     })
   })
 
   describe('when token is null', () => {
-    it('returns valid: false without calling jwtVerify', async () => {
-      process.env.MCP_JWKS_URL = 'https://example.clerk.accounts.dev/.well-known/jwks.json'
-
+    it('returns valid: false without checking providers', async () => {
+      setProviders([CLERK_PROVIDER])
       const result = await verifyExternalJwt(null)
-
-      expect(result.valid).toBe(false)
-      expect(mockJwtVerify).not.toHaveBeenCalled()
-    })
-
-    it('returns valid: false even when config is explicitly provided', async () => {
-      const result = await verifyExternalJwt(null, {
-        jwksUrl: 'https://example.clerk.accounts.dev/.well-known/jwks.json',
-      })
-
       expect(result.valid).toBe(false)
       expect(mockJwtVerify).not.toHaveBeenCalled()
     })
   })
 
-  describe('when token verification succeeds', () => {
-    it('returns valid: true with payload when jwtVerify resolves', async () => {
+  describe('provider validation', () => {
+    it('skips providers missing audience', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      setProviders([{ name: 'no-aud', jwksUrl: 'https://example.com/.well-known/jwks.json' }])
+      const result = await verifyExternalJwt('some-token')
+      expect(result.valid).toBe(false)
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('missing "audience"')
+      )
+      consoleSpy.mockRestore()
+    })
+
+    it('skips providers missing jwksUrl', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      setProviders([{ name: 'no-url', audience: 'test' }])
+      const result = await verifyExternalJwt('some-token')
+      expect(result.valid).toBe(false)
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('missing "jwksUrl"')
+      )
+      consoleSpy.mockRestore()
+    })
+
+    it('skips providers missing name', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      setProviders([{ jwksUrl: 'https://example.com/.well-known/jwks.json', audience: 'test' }])
+      const result = await verifyExternalJwt('some-token')
+      expect(result.valid).toBe(false)
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('missing "name"')
+      )
+      consoleSpy.mockRestore()
+    })
+  })
+
+  describe('single provider - success', () => {
+    it('returns valid: true with payload and provider name', async () => {
+      setProviders([CLERK_PROVIDER])
       const mockPayload: JWTPayload = {
         sub: 'user_abc123',
-        iss: 'https://example.clerk.accounts.dev',
-        aud: 'my-audience',
-        exp: Math.floor(Date.now() / 1000) + 3600,
+        iss: CLERK_PROVIDER.issuer,
+        aud: CLERK_PROVIDER.audience,
       }
       mockJwtVerify.mockResolvedValueOnce({
         payload: mockPayload,
         protectedHeader: { alg: 'RS256' },
       } as Awaited<ReturnType<typeof jwtVerify>>)
 
-      const result = await verifyExternalJwt('valid.jwt.token', {
-        jwksUrl: 'https://example.clerk.accounts.dev/.well-known/jwks.json',
-        issuer: 'https://example.clerk.accounts.dev',
-        audience: 'my-audience',
-      })
+      const result = await verifyExternalJwt('valid.jwt.token')
 
       expect(result.valid).toBe(true)
       if (result.valid) {
         expect(result.payload.sub).toBe('user_abc123')
-        expect(result.payload.iss).toBe('https://example.clerk.accounts.dev')
+        expect(result.provider).toBe('clerk')
       }
     })
 
-    it('passes issuer and audience options to jwtVerify', async () => {
+    it('passes audience to jwtVerify options (always required)', async () => {
+      setProviders([CLERK_PROVIDER])
       const mockPayload: JWTPayload = { sub: 'user_1' }
       mockJwtVerify.mockResolvedValueOnce({
         payload: mockPayload,
         protectedHeader: { alg: 'RS256' },
       } as Awaited<ReturnType<typeof jwtVerify>>)
 
-      await verifyExternalJwt('valid.jwt.token', {
-        jwksUrl: 'https://example.clerk.accounts.dev/.well-known/jwks.json',
-        issuer: 'https://example.clerk.accounts.dev',
-        audience: 'sluice-mcp',
-      })
+      await verifyExternalJwt('valid.jwt.token')
 
       expect(mockJwtVerify).toHaveBeenCalledWith(
         'valid.jwt.token',
         expect.any(Function),
         expect.objectContaining({
-          issuer: 'https://example.clerk.accounts.dev',
-          audience: 'sluice-mcp',
+          issuer: CLERK_PROVIDER.issuer,
+          audience: CLERK_PROVIDER.audience,
         }),
       )
     })
 
-    it('resolves issuer and audience from env vars when not in config', async () => {
-      process.env.MCP_JWKS_URL = 'https://env.clerk.accounts.dev/.well-known/jwks.json'
-      process.env.MCP_JWT_ISSUER = 'https://env.clerk.accounts.dev'
-      process.env.MCP_JWT_AUDIENCE = 'env-audience'
-
-      const mockPayload: JWTPayload = { sub: 'user_env' }
+    it('omits issuer when not configured on provider', async () => {
+      setProviders([{ name: 'no-issuer', jwksUrl: CLERK_PROVIDER.jwksUrl, audience: 'test' }])
+      const mockPayload: JWTPayload = { sub: 'user_1' }
       mockJwtVerify.mockResolvedValueOnce({
         payload: mockPayload,
         protectedHeader: { alg: 'RS256' },
       } as Awaited<ReturnType<typeof jwtVerify>>)
 
-      const result = await verifyExternalJwt('env.jwt.token')
-
-      expect(result.valid).toBe(true)
-      expect(mockJwtVerify).toHaveBeenCalledWith(
-        'env.jwt.token',
-        expect.any(Function),
-        expect.objectContaining({
-          issuer: 'https://env.clerk.accounts.dev',
-          audience: 'env-audience',
-        }),
-      )
-    })
-
-    it('omits issuer from jwtVerify options when not configured', async () => {
-      const mockPayload: JWTPayload = { sub: 'user_noiss' }
-      mockJwtVerify.mockResolvedValueOnce({
-        payload: mockPayload,
-        protectedHeader: { alg: 'RS256' },
-      } as Awaited<ReturnType<typeof jwtVerify>>)
-
-      await verifyExternalJwt('token', {
-        jwksUrl: 'https://example.clerk.accounts.dev/.well-known/jwks.json',
-        // no issuer, no audience
-      })
+      await verifyExternalJwt('token')
 
       const callArgs = mockJwtVerify.mock.calls[0]
-      expect(callArgs).toBeDefined()
       const options = callArgs?.[2] as Record<string, unknown>
       expect(options).not.toHaveProperty('issuer')
-      expect(options).not.toHaveProperty('audience')
+      expect(options).toHaveProperty('audience', 'test')
     })
   })
 
-  describe('when token verification fails', () => {
-    it('returns valid: false when jwtVerify throws (bad signature)', async () => {
+  describe('single provider - failure', () => {
+    it('returns valid: false and logs debug on verification failure', async () => {
+      const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
+      setProviders([CLERK_PROVIDER])
       mockJwtVerify.mockRejectedValueOnce(new Error('JWS Invalid Signature'))
 
-      const result = await verifyExternalJwt('bad.signature.token', {
-        jwksUrl: 'https://example.clerk.accounts.dev/.well-known/jwks.json',
-        issuer: 'https://example.clerk.accounts.dev',
-      })
+      const result = await verifyExternalJwt('bad.token')
 
       expect(result.valid).toBe(false)
-    })
-
-    it('returns valid: false when jwtVerify throws (expired token)', async () => {
-      mockJwtVerify.mockRejectedValueOnce(new Error('JWT Expired'))
-
-      const result = await verifyExternalJwt('expired.jwt.token', {
-        jwksUrl: 'https://example.clerk.accounts.dev/.well-known/jwks.json',
-      })
-
-      expect(result.valid).toBe(false)
-    })
-
-    it('returns valid: false when jwtVerify throws (wrong issuer)', async () => {
-      mockJwtVerify.mockRejectedValueOnce(new Error('JWT Issuer Invalid'))
-
-      const result = await verifyExternalJwt('wrong.issuer.token', {
-        jwksUrl: 'https://example.clerk.accounts.dev/.well-known/jwks.json',
-        issuer: 'https://expected.issuer.dev',
-      })
-
-      expect(result.valid).toBe(false)
-    })
-
-    it('returns valid: false when jwtVerify throws (wrong audience)', async () => {
-      mockJwtVerify.mockRejectedValueOnce(new Error('JWT Audience Invalid'))
-
-      const result = await verifyExternalJwt('wrong.audience.token', {
-        jwksUrl: 'https://example.clerk.accounts.dev/.well-known/jwks.json',
-        audience: 'expected-audience',
-      })
-
-      expect(result.valid).toBe(false)
-    })
-
-    it('does not throw - always returns result object', async () => {
-      mockJwtVerify.mockRejectedValueOnce(new Error('Unexpected error'))
-
-      await expect(
-        verifyExternalJwt('any.token', {
-          jwksUrl: 'https://example.clerk.accounts.dev/.well-known/jwks.json',
-        }),
-      ).resolves.toEqual({ valid: false })
+      expect(debugSpy).toHaveBeenCalledWith(
+        expect.stringContaining('clerk')
+      )
+      expect(debugSpy).toHaveBeenCalledWith(
+        expect.stringContaining('JWS Invalid Signature')
+      )
+      debugSpy.mockRestore()
     })
   })
 
-  describe('JWKS resolver caching', () => {
-    it('creates resolver once for the same URL across multiple calls', async () => {
-      const jwksUrl = 'https://example.clerk.accounts.dev/.well-known/jwks.json'
+  describe('multi-provider iteration', () => {
+    it('tries second provider when first rejects', async () => {
+      const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
+      setProviders([CLERK_PROVIDER, AUTH0_PROVIDER])
+
+      // First provider rejects
+      mockJwtVerify.mockRejectedValueOnce(new Error('JWT Audience Invalid'))
+      // Second provider accepts
+      const mockPayload: JWTPayload = { sub: 'user_from_auth0' }
+      mockJwtVerify.mockResolvedValueOnce({
+        payload: mockPayload,
+        protectedHeader: { alg: 'RS256' },
+      } as Awaited<ReturnType<typeof jwtVerify>>)
+
+      const result = await verifyExternalJwt('auth0.jwt.token')
+
+      expect(result.valid).toBe(true)
+      if (result.valid) {
+        expect(result.provider).toBe('auth0')
+        expect(result.payload.sub).toBe('user_from_auth0')
+      }
+      // Debug log for the first provider's rejection
+      expect(debugSpy).toHaveBeenCalledWith(
+        expect.stringContaining('clerk')
+      )
+      debugSpy.mockRestore()
+    })
+
+    it('returns valid: false when all providers reject', async () => {
+      const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
+      setProviders([CLERK_PROVIDER, AUTH0_PROVIDER])
+
+      mockJwtVerify.mockRejectedValueOnce(new Error('JWT Audience Invalid'))
+      mockJwtVerify.mockRejectedValueOnce(new Error('JWT Expired'))
+
+      const result = await verifyExternalJwt('rejected.everywhere')
+
+      expect(result.valid).toBe(false)
+      expect(debugSpy).toHaveBeenCalledTimes(2)
+      debugSpy.mockRestore()
+    })
+
+    it('stops iteration on first successful provider', async () => {
+      setProviders([CLERK_PROVIDER, AUTH0_PROVIDER])
+      const mockPayload: JWTPayload = { sub: 'user_1' }
+      mockJwtVerify.mockResolvedValueOnce({
+        payload: mockPayload,
+        protectedHeader: { alg: 'RS256' },
+      } as Awaited<ReturnType<typeof jwtVerify>>)
+
+      await verifyExternalJwt('token')
+
+      // Only one call - stopped after first match
+      expect(mockJwtVerify).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('JWKS resolver caching (Map-based)', () => {
+    it('creates resolver once per unique URL across multiple calls', async () => {
+      setProviders([CLERK_PROVIDER])
       const mockPayload: JWTPayload = { sub: 'user_1' }
       mockJwtVerify.mockResolvedValue({
         payload: mockPayload,
         protectedHeader: { alg: 'RS256' },
       } as Awaited<ReturnType<typeof jwtVerify>>)
 
-      await verifyExternalJwt('token1', { jwksUrl })
-      await verifyExternalJwt('token2', { jwksUrl })
-      await verifyExternalJwt('token3', { jwksUrl })
+      await verifyExternalJwt('token1')
+      await verifyExternalJwt('token2')
+      await verifyExternalJwt('token3')
 
-      // createRemoteJWKSet should only be called once for the same URL
       expect(mockCreateRemoteJWKSet).toHaveBeenCalledTimes(1)
     })
 
-    it('creates a new resolver when URL changes', async () => {
-      const mockPayload: JWTPayload = { sub: 'user_1' }
-      mockJwtVerify.mockResolvedValue({
-        payload: mockPayload,
-        protectedHeader: { alg: 'RS256' },
-      } as Awaited<ReturnType<typeof jwtVerify>>)
-
-      await verifyExternalJwt('token1', {
-        jwksUrl: 'https://first.clerk.accounts.dev/.well-known/jwks.json',
-      })
-      await verifyExternalJwt('token2', {
-        jwksUrl: 'https://second.clerk.accounts.dev/.well-known/jwks.json',
-      })
-
-      expect(mockCreateRemoteJWKSet).toHaveBeenCalledTimes(2)
-    })
-
-    it('_resetJwksCache causes resolver to be recreated on next call', async () => {
-      const jwksUrl = 'https://example.clerk.accounts.dev/.well-known/jwks.json'
-      const mockPayload: JWTPayload = { sub: 'user_1' }
-      mockJwtVerify.mockResolvedValue({
-        payload: mockPayload,
-        protectedHeader: { alg: 'RS256' },
-      } as Awaited<ReturnType<typeof jwtVerify>>)
-
-      await verifyExternalJwt('token1', { jwksUrl })
-      _resetJwksCache()
-      await verifyExternalJwt('token2', { jwksUrl })
-
-      expect(mockCreateRemoteJWKSet).toHaveBeenCalledTimes(2)
-    })
-
-    it('createRemoteJWKSet is called with a URL instance', async () => {
-      const jwksUrl = 'https://example.clerk.accounts.dev/.well-known/jwks.json'
+    it('caches resolvers independently for different URLs', async () => {
+      setProviders([CLERK_PROVIDER, AUTH0_PROVIDER])
+      // Both providers succeed (first match wins, but we want to see both URLs cached)
+      mockJwtVerify.mockRejectedValueOnce(new Error('fail'))
+      const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
       const mockPayload: JWTPayload = { sub: 'user_1' }
       mockJwtVerify.mockResolvedValueOnce({
         payload: mockPayload,
         protectedHeader: { alg: 'RS256' },
       } as Awaited<ReturnType<typeof jwtVerify>>)
 
-      await verifyExternalJwt('token', { jwksUrl })
+      await verifyExternalJwt('token1')
 
-      expect(mockCreateRemoteJWKSet).toHaveBeenCalledWith(new URL(jwksUrl))
+      // Both URLs should have resolvers created
+      expect(mockCreateRemoteJWKSet).toHaveBeenCalledTimes(2)
+
+      // Second call - resolvers are cached, no new creation
+      vi.clearAllMocks()
+      mockCreateRemoteJWKSet.mockImplementation(
+        () => vi.fn() as unknown as ReturnType<typeof createRemoteJWKSet>,
+      )
+      mockJwtVerify.mockRejectedValueOnce(new Error('fail'))
+      mockJwtVerify.mockResolvedValueOnce({
+        payload: mockPayload,
+        protectedHeader: { alg: 'RS256' },
+      } as Awaited<ReturnType<typeof jwtVerify>>)
+
+      await verifyExternalJwt('token2')
+
+      expect(mockCreateRemoteJWKSet).toHaveBeenCalledTimes(0)
+      debugSpy.mockRestore()
+    })
+
+    it('_resetJwksCache clears all cached resolvers', async () => {
+      setProviders([CLERK_PROVIDER])
+      const mockPayload: JWTPayload = { sub: 'user_1' }
+      mockJwtVerify.mockResolvedValue({
+        payload: mockPayload,
+        protectedHeader: { alg: 'RS256' },
+      } as Awaited<ReturnType<typeof jwtVerify>>)
+
+      await verifyExternalJwt('token1')
+      _resetJwksCache()
+      await verifyExternalJwt('token2')
+
+      expect(mockCreateRemoteJWKSet).toHaveBeenCalledTimes(2)
     })
   })
 })
