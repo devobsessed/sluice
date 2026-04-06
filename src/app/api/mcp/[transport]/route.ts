@@ -54,7 +54,7 @@ const handler = createMcpHandler(
  */
 async function wrappedHandler(request: Request): Promise<Response> {
   // In production, verify auth via one of two paths:
-  // 1. External JWKS (machine-to-machine) - tried first when MCP_JWKS_URL is configured
+  // 1. External JWKS (machine-to-machine) - tried first when MCP_EXTERNAL_AUTH_PROVIDERS is configured
   // 2. Better Auth OAuth (browser-based MCP clients) - tried second as fallback
   // In development, skip auth so local MCP tools work without OAuth setup
   if (process.env.NODE_ENV === 'production') {
@@ -76,7 +76,10 @@ async function wrappedHandler(request: Request): Promise<Response> {
 
     // Path 1: Try external JWKS verification (machine-to-machine tokens)
     const externalResult = await verifyExternalJwt(accessToken)
-    if (!externalResult.valid) {
+    if (externalResult.valid) {
+      // M2M token verified - log provider for audit trail
+      console.debug(`MCP auth: external JWT verified via provider "${externalResult.provider}"`)
+    } else {
       // Path 2: Fall back to better-auth OAuth verification (browser tokens)
       try {
         await verifyAccessToken(accessToken, {

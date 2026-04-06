@@ -173,7 +173,7 @@ describe('MCP Route Handler', () => {
     // --- External JWT (machine-to-machine) path ---
 
     it('allows requests with valid external JWT through to MCP handler', async () => {
-      mockVerifyExternalJwt.mockResolvedValue({ valid: true, payload: { sub: 'service-account' } })
+      mockVerifyExternalJwt.mockResolvedValue({ valid: true, payload: { sub: 'service-account' }, provider: 'test-provider' })
 
       const request = new Request('http://localhost:3000/api/mcp/mcp', {
         method: 'POST',
@@ -233,7 +233,7 @@ describe('MCP Route Handler', () => {
     }, 10000)
 
     it('skips better-auth fallback when external JWT succeeds', async () => {
-      mockVerifyExternalJwt.mockResolvedValue({ valid: true, payload: { sub: 'service-account' } })
+      mockVerifyExternalJwt.mockResolvedValue({ valid: true, payload: { sub: 'service-account' }, provider: 'test-provider' })
 
       const request = new Request('http://localhost:3000/api/mcp/mcp', {
         method: 'POST',
@@ -366,7 +366,7 @@ describe('MCP Route Handler', () => {
     })
 
     it('passes Bearer token to verifyExternalJwt', async () => {
-      mockVerifyExternalJwt.mockResolvedValue({ valid: true, payload: { sub: 'service-account' } })
+      mockVerifyExternalJwt.mockResolvedValue({ valid: true, payload: { sub: 'service-account' }, provider: 'test-provider' })
 
       const request = new Request('http://localhost:3000/api/mcp/mcp', {
         method: 'POST',
