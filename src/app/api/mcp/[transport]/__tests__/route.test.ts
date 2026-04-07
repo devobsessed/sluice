@@ -11,13 +11,20 @@ vi.mock('better-auth/oauth2', () => ({
   verifyAccessToken: (...args: unknown[]) => mockVerifyAccessToken(...args),
 }))
 
+// Mock verifyExternalJwt from auth-guards
+const mockVerifyExternalJwt = vi.fn()
+vi.mock('@/lib/auth-guards', () => ({
+  verifyExternalJwt: (...args: unknown[]) => mockVerifyExternalJwt(...args),
+}))
+
 // Import after mocking
 const routeModule = await import('../route')
 
 describe('MCP Route Handler', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    // Default: token verification succeeds
+    // Default: external JWT fails (no MCP_JWKS_URL configured), better-auth succeeds
+    mockVerifyExternalJwt.mockResolvedValue({ valid: false })
     mockVerifyAccessToken.mockResolvedValue({ sub: 'user-1', scope: 'openid' })
   })
 
@@ -105,7 +112,7 @@ describe('MCP Route Handler', () => {
     })
 
     it('rejects unauthenticated requests with 401 in production', async () => {
-      // No Authorization header — should 401 without calling verifyAccessToken
+      // No Authorization header — should 401 without calling either verifier
       const request = new Request('http://localhost:3000/api/mcp/mcp', {
         method: 'POST',
         headers: {
@@ -130,7 +137,8 @@ describe('MCP Route Handler', () => {
       const body = await response.json()
       expect(body.error).toBe('Unauthorized')
 
-      // verifyAccessToken should NOT have been called (no token to verify)
+      // Neither verifier should have been called (no token to verify)
+      expect(mockVerifyExternalJwt).not.toHaveBeenCalled()
       expect(mockVerifyAccessToken).not.toHaveBeenCalled()
     })
 
@@ -162,7 +170,91 @@ describe('MCP Route Handler', () => {
       expect(wwwAuth).toContain('/.well-known/oauth-protected-resource')
     })
 
-    it('allows authenticated requests through to MCP handler in production', async () => {
+    // --- External JWT (machine-to-machine) path ---
+
+    it('allows requests with valid external JWT through to MCP handler', async () => {
+      mockVerifyExternalJwt.mockResolvedValue({ valid: true, payload: { sub: 'service-account' }, provider: 'test-provider' })
+
+      const request = new Request('http://localhost:3000/api/mcp/mcp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream',
+          'Authorization': 'Bearer valid-external-jwt',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2024-11-05',
+            capabilities: {},
+            clientInfo: { name: 'test-client', version: '1.0.0' },
+          },
+        }),
+      })
+
+      const response = await routeModule.POST(request)
+      expect(response.status).toBe(200)
+
+      // External JWT succeeded — better-auth fallback should NOT have been tried
+      expect(mockVerifyAccessToken).not.toHaveBeenCalled()
+    }, 10000)
+
+    it('tries external JWT first before falling back to better-auth', async () => {
+      // External JWT fails, better-auth succeeds
+      mockVerifyExternalJwt.mockResolvedValue({ valid: false })
+      mockVerifyAccessToken.mockResolvedValue({ sub: 'user-1', scope: 'openid' })
+
+      const request = new Request('http://localhost:3000/api/mcp/mcp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream',
+          'Authorization': 'Bearer better-auth-token',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2024-11-05',
+            capabilities: {},
+            clientInfo: { name: 'test-client', version: '1.0.0' },
+          },
+        }),
+      })
+
+      await routeModule.POST(request)
+
+      // Both paths should have been tried in order
+      expect(mockVerifyExternalJwt).toHaveBeenCalledOnce()
+      expect(mockVerifyAccessToken).toHaveBeenCalledOnce()
+    }, 10000)
+
+    it('skips better-auth fallback when external JWT succeeds', async () => {
+      mockVerifyExternalJwt.mockResolvedValue({ valid: true, payload: { sub: 'service-account' }, provider: 'test-provider' })
+
+      const request = new Request('http://localhost:3000/api/mcp/mcp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream',
+          'Authorization': 'Bearer external-jwt-token',
+        },
+        body: '{}',
+      })
+
+      await routeModule.POST(request)
+
+      expect(mockVerifyExternalJwt).toHaveBeenCalledOnce()
+      expect(mockVerifyAccessToken).not.toHaveBeenCalled()
+    })
+
+    // --- Better Auth (browser OAuth) path ---
+
+    it('allows authenticated requests via better-auth through to MCP handler', async () => {
+      mockVerifyExternalJwt.mockResolvedValue({ valid: false })
       mockVerifyAccessToken.mockResolvedValue({ sub: 'user-1', scope: 'openid' })
 
       const request = new Request('http://localhost:3000/api/mcp/mcp', {
@@ -188,7 +280,8 @@ describe('MCP Route Handler', () => {
       expect(response.status).toBe(200)
     }, 10000)
 
-    it('passes Bearer token to verifyAccessToken', async () => {
+    it('passes Bearer token to verifyAccessToken when external JWT fails', async () => {
+      mockVerifyExternalJwt.mockResolvedValue({ valid: false })
       mockVerifyAccessToken.mockResolvedValue({ sub: 'user-1', scope: 'openid' })
 
       const request = new Request('http://localhost:3000/api/mcp/mcp', {
@@ -203,14 +296,15 @@ describe('MCP Route Handler', () => {
       await routeModule.POST(request)
 
       expect(mockVerifyAccessToken).toHaveBeenCalledOnce()
-      const [token, opts] = mockVerifyAccessToken.mock.calls[0] as [string, { verifyOptions: { issuer: string | undefined, audience: string | undefined } }]
+      const [token, opts] = mockVerifyAccessToken.mock.calls[0] as [string, { verifyOptions: { issuer: string | undefined, audience: string[] | undefined } }]
       expect(token).toBe('my-access-token')
       expect(opts).toHaveProperty('verifyOptions')
       expect(opts.verifyOptions).toHaveProperty('issuer')
       expect(opts.verifyOptions).toHaveProperty('audience')
     })
 
-    it('rejects requests with invalid tokens', async () => {
+    it('rejects requests when both auth paths fail', async () => {
+      mockVerifyExternalJwt.mockResolvedValue({ valid: false })
       mockVerifyAccessToken.mockRejectedValue(new Error('Token expired'))
 
       const request = new Request('http://localhost:3000/api/mcp/mcp', {
@@ -218,7 +312,7 @@ describe('MCP Route Handler', () => {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json, text/event-stream',
-          'Authorization': 'Bearer expired-token',
+          'Authorization': 'Bearer bad-token',
         },
         body: JSON.stringify({
           jsonrpc: '2.0',
@@ -239,7 +333,8 @@ describe('MCP Route Handler', () => {
       expect(body.error).toBe('Unauthorized')
     })
 
-    it('includes WWW-Authenticate header on 401 (invalid token)', async () => {
+    it('includes WWW-Authenticate header on 401 when both auth paths fail', async () => {
+      mockVerifyExternalJwt.mockResolvedValue({ valid: false })
       mockVerifyAccessToken.mockRejectedValue(new Error('Token expired'))
 
       const request = new Request('http://localhost:3000/api/mcp/mcp', {
@@ -270,7 +365,27 @@ describe('MCP Route Handler', () => {
       expect(wwwAuth).toContain('/.well-known/oauth-protected-resource')
     })
 
+    it('passes Bearer token to verifyExternalJwt', async () => {
+      mockVerifyExternalJwt.mockResolvedValue({ valid: true, payload: { sub: 'service-account' }, provider: 'test-provider' })
+
+      const request = new Request('http://localhost:3000/api/mcp/mcp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer my-external-jwt',
+        },
+        body: '{}',
+      })
+
+      await routeModule.POST(request)
+
+      expect(mockVerifyExternalJwt).toHaveBeenCalledOnce()
+      const [token] = mockVerifyExternalJwt.mock.calls[0] as [string]
+      expect(token).toBe('my-external-jwt')
+    })
+
     it('adds Accept header when missing for authenticated requests', async () => {
+      mockVerifyExternalJwt.mockResolvedValue({ valid: false })
       mockVerifyAccessToken.mockResolvedValue({ sub: 'user-1', scope: 'openid' })
 
       // Request without Accept header — should still reach MCP handler after auth passes
@@ -322,6 +437,7 @@ describe('MCP Route Handler', () => {
       const response = await routeModule.POST(request)
       // Should pass through to MCP handler, not 401
       expect(response.status).toBe(200)
+      expect(mockVerifyExternalJwt).not.toHaveBeenCalled()
       expect(mockVerifyAccessToken).not.toHaveBeenCalled()
     }, 10000)
   })

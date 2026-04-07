@@ -321,7 +321,7 @@ export const oauthRefreshToken = pgTable('oauth_refresh_token', {
   sessionId: text('session_id'),
   referenceId: text('reference_id'),
   scopes: jsonb('scopes').notNull().$type<string[]>(),
-  revoked: boolean('revoked').default(false),
+  revoked: timestamp('revoked'),
   createdAt: timestamp('created_at').notNull(),
   expiresAt: timestamp('expires_at').notNull(),
 }, (table) => ({
