@@ -87,6 +87,23 @@ describe('OAuth route handler', () => {
       })
     })
 
+    it('tolerates a trailing slash on the token endpoint path', async () => {
+      mockBetterAuthPost.mockResolvedValue(
+        jsonResponse(400, { error: 'invalid_request', error_description: 'session not found' }),
+      )
+
+      const req = new Request(`${TOKEN_URL}/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: 'bogus' }).toString(),
+      })
+      const res = await routeModule.POST(req)
+
+      const body = await res.json()
+      expect(body.error).toBe('invalid_grant')
+      expect(warnSpy).toHaveBeenCalledOnce()
+    })
+
     it('preserves response headers (other than content-length)', async () => {
       mockBetterAuthPost.mockResolvedValue(
         jsonResponse(
@@ -177,6 +194,23 @@ describe('OAuth route handler', () => {
       const body = await res.json()
       expect(body.error).toBe('invalid_grant')
       expect(body.error_description).toBe('token revoked')
+      expect(warnSpy).not.toHaveBeenCalled()
+    })
+
+    it('does not remap when request body is JSON-encoded (not form-encoded)', async () => {
+      mockBetterAuthPost.mockResolvedValue(
+        jsonResponse(400, { error: 'invalid_request', error_description: 'session not found' }),
+      )
+
+      const req = new Request(TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: 'bogus' }),
+      })
+      const res = await routeModule.POST(req)
+
+      const body = await res.json()
+      expect(body.error).toBe('invalid_request')
       expect(warnSpy).not.toHaveBeenCalled()
     })
 

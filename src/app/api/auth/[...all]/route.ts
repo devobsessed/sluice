@@ -17,15 +17,19 @@ const TOKEN_ENDPOINT_PATH = '/api/auth/oauth2/token'
  * path, leaving users stuck without a re-auth prompt.
  *
  * The remap is scoped to the exact misclassified case:
- *  - URL path is the token endpoint
+ *  - URL path is the token endpoint (trailing slash tolerated)
  *  - Method is POST with `grant_type=refresh_token`
  *  - Response is HTTP 400 with JSON `error === "invalid_request"`
- * Everything else passes through untouched so genuine `invalid_request`
- * surfaces (malformed body, missing params, etc.) remain diagnosable.
+ * Everything else passes through untouched. Note: any `invalid_request`
+ * response for a refresh_token grant at this endpoint will be remapped,
+ * since better-auth 1.4.19 only emits `invalid_request` here for the
+ * "session not found" case. The `console.warn` log preserves observability
+ * if that assumption changes in a future better-auth version.
  */
 export async function POST(request: Request): Promise<Response> {
   const url = new URL(request.url)
-  const isTokenEndpoint = url.pathname === TOKEN_ENDPOINT_PATH
+  const normalizedPath = url.pathname.replace(/\/$/, '')
+  const isTokenEndpoint = normalizedPath === TOKEN_ENDPOINT_PATH
 
   let isRefreshTokenGrant = false
   if (isTokenEndpoint) {
@@ -59,6 +63,7 @@ export async function POST(request: Request): Promise<Response> {
   if (
     !body ||
     typeof body !== 'object' ||
+    Array.isArray(body) ||
     (body as { error?: unknown }).error !== 'invalid_request'
   ) {
     return response
