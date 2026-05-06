@@ -352,7 +352,16 @@ export const oauthConsent = pgTable('oauth_consent', {
  *
  * - token_hash: SHA-256 hex digest of the refresh_token form value (PK)
  * - response: full HTTP response shape { status, body, headers } as JSONB
- * - expires_at: row TTL; rows past expiry are lazy-deleted on read
+ * - expires_at: row TTL (5 seconds, set by the dedupe helper)
+ *
+ * Cleanup semantics:
+ * Lazy delete only fires when the SAME token_hash is presented again past TTL,
+ * which never happens under normal traffic because refresh tokens rotate on
+ * use - the old hash is never re-presented. Expired rows accumulate at
+ * ~1 row per refresh cycle. Acceptable for current single-tenant volume.
+ * If the table grows large, add a periodic sweep
+ * (DELETE FROM oauth_refresh_dedupe WHERE expires_at < now()) to a cron task -
+ * the expires_at index supports this efficiently.
  */
 export const oauthRefreshDedupe = pgTable('oauth_refresh_dedupe', {
   tokenHash: text('token_hash').primaryKey(),
