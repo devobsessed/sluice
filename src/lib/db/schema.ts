@@ -343,6 +343,30 @@ export const oauthConsent = pgTable('oauth_consent', {
 }))
 
 /**
+ * OAuth Refresh Dedupe table - short-lived cache (TTL ~5s) keyed by SHA-256
+ * hash of the presented refresh_token. Used by the wrapper at
+ * src/app/api/auth/[...all]/route.ts to dedupe concurrent refresh requests
+ * before they reach better-auth's reuse-detection branch (which would
+ * otherwise call adapter.deleteMany() and nuke the user's entire refresh
+ * token chain).
+ *
+ * - token_hash: SHA-256 hex digest of the refresh_token form value (PK)
+ * - response: full HTTP response shape { status, body, headers } as JSONB
+ * - expires_at: row TTL; rows past expiry are lazy-deleted on read
+ */
+export const oauthRefreshDedupe = pgTable('oauth_refresh_dedupe', {
+  tokenHash: text('token_hash').primaryKey(),
+  response: jsonb('response').notNull().$type<{
+    status: number
+    body: string  // JSON-stringified body OR raw text body
+    headers: Array<[string, string]>  // [[name, value], ...] preserves multi-value headers
+  }>(),
+  expiresAt: timestamp('expires_at').notNull(),
+}, (table) => ({
+  expiresAtIdx: index('oauth_refresh_dedupe_expires_at_idx').on(table.expiresAt),
+}))
+
+/**
  * Access Requests table - external users request access to Sluice
  * Status transitions: pending -> approved OR pending -> denied (final)
  */
@@ -416,6 +440,9 @@ export type NewOAuthRefreshToken = typeof oauthRefreshToken.$inferInsert;
 
 export type OAuthConsent = typeof oauthConsent.$inferSelect;
 export type NewOAuthConsent = typeof oauthConsent.$inferInsert;
+
+export type OAuthRefreshDedupe = typeof oauthRefreshDedupe.$inferSelect;
+export type NewOAuthRefreshDedupe = typeof oauthRefreshDedupe.$inferInsert;
 
 export type AccessRequest = typeof accessRequests.$inferSelect;
 export type NewAccessRequest = typeof accessRequests.$inferInsert;

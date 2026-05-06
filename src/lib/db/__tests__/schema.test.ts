@@ -123,3 +123,51 @@ describe('Videos table schema (nullable youtubeId + sourceType)', () => {
     expect(video2!.youtubeId).toBeNull()
   })
 })
+
+describe('oauth_refresh_dedupe table', () => {
+  beforeEach(async () => {
+    await setupTestDb()
+  })
+
+  afterAll(async () => {
+    await teardownTestDb()
+  })
+
+  it('accepts insert and select with the documented shape', async () => {
+    const db = getTestDb()
+    const expiresAt = new Date(Date.now() + 5000)
+
+    const [row] = await db
+      .insert(schema.oauthRefreshDedupe)
+      .values({
+        tokenHash: 'a'.repeat(64),
+        response: {
+          status: 200,
+          body: JSON.stringify({ access_token: 'x', token_type: 'Bearer' }),
+          headers: [['content-type', 'application/json']],
+        },
+        expiresAt,
+      })
+      .returning()
+
+    expect(row).toBeDefined()
+    expect(row!.tokenHash).toBe('a'.repeat(64))
+    expect(row!.response.status).toBe(200)
+    expect(row!.response.headers[0]).toEqual(['content-type', 'application/json'])
+  })
+
+  it('enforces primary key uniqueness on token_hash', async () => {
+    const db = getTestDb()
+    const expiresAt = new Date(Date.now() + 5000)
+    const baseRow = {
+      tokenHash: 'b'.repeat(64),
+      response: { status: 200, body: '{}', headers: [] as Array<[string, string]> },
+      expiresAt,
+    }
+
+    await db.insert(schema.oauthRefreshDedupe).values(baseRow)
+    await expect(
+      db.insert(schema.oauthRefreshDedupe).values(baseRow)
+    ).rejects.toThrow()
+  })
+})

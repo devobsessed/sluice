@@ -14,7 +14,7 @@ let testDb: ReturnType<typeof drizzle<typeof schema>> | null = null;
 
 export async function setupTestDb() {
   if (!pool) {
-    pool = new Pool({ connectionString: TEST_DATABASE_URL, max: 1 });
+    pool = new Pool({ connectionString: TEST_DATABASE_URL, max: 5 });
     testDb = drizzle(pool, { schema });
   }
 
@@ -34,7 +34,8 @@ export async function setupTestDb() {
         'personas', 'jobs',
         'user', 'session', 'account', 'verification', 'access_requests',
         'discovery_videos',
-        'jwks', 'oauth_client', 'oauth_access_token', 'oauth_refresh_token', 'oauth_consent'
+        'jwks', 'oauth_client', 'oauth_access_token', 'oauth_refresh_token', 'oauth_consent',
+        'oauth_refresh_dedupe'
       ];
     BEGIN
       FOREACH tbl IN ARRAY all_tables LOOP
