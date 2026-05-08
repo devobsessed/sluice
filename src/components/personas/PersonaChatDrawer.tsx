@@ -315,7 +315,7 @@ export function PersonaChatDrawer({
 
       {/* Memory indicator */}
       <p className="text-[11px] text-muted-foreground text-center py-1 px-4 shrink-0">
-        Remembers last 10 messages
+        Remembers last 50 exchanges
       </p>
 
       {/* Input bar */}

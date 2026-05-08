@@ -50,7 +50,7 @@ export const historyItemSchema = z.object({
 
 export type HistoryItem = z.infer<typeof historyItemSchema>
 
-export const historySchema = z.array(historyItemSchema).max(10)
+export const historySchema = z.array(historyItemSchema).max(50)
 
 // ── Migration ─────────────────────────────────────────────────────────────────
 
@@ -144,12 +144,12 @@ export function saveChatStorage(personaId: number, data: ChatStorageV2): void {
 
 // ── Context window extraction ─────────────────────────────────────────────────
 
-const MAX_HISTORY_CHARS = 4000
-const MAX_HISTORY_PAIRS = 10
+const MAX_HISTORY_CHARS = 20000
+const MAX_HISTORY_PAIRS = 50
 
 /**
  * Extracts the active context window: completed Q&A pairs after the last
- * thread boundary, capped at 10 pairs and ~4000 chars total.
+ * thread boundary, capped at 50 pairs and ~20000 chars total.
  */
 export function getContextWindow(entries: ChatEntry[]): HistoryItem[] {
   // Find index of last thread boundary
@@ -169,13 +169,17 @@ export function getContextWindow(entries: ChatEntry[]): HistoryItem[] {
     .filter(isChatMessage)
     .filter((m) => !m.isStreaming && !m.isError && m.answer.length > 0)
 
-  // Take last N pairs, then cap by char count
+  // Take last N pairs, then cap by char count.
+  // Iterate newest-to-oldest so the char cap drops OLDEST messages first
+  // (preserving recent context). Reverse the result at the end so callers
+  // receive history in chronological order.
   const recent = completed.slice(-MAX_HISTORY_PAIRS)
 
   const result: HistoryItem[] = []
   let totalChars = 0
 
-  for (const msg of recent) {
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const msg = recent[i]!
     const pairChars = msg.question.length + msg.answer.length
     if (totalChars + pairChars > MAX_HISTORY_CHARS && result.length > 0) {
       break
@@ -184,7 +188,7 @@ export function getContextWindow(entries: ChatEntry[]): HistoryItem[] {
     totalChars += pairChars
   }
 
-  return result
+  return result.reverse()
 }
 
 // ── Helpers for hub ───────────────────────────────────────────────────────────
