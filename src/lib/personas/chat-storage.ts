@@ -169,13 +169,17 @@ export function getContextWindow(entries: ChatEntry[]): HistoryItem[] {
     .filter(isChatMessage)
     .filter((m) => !m.isStreaming && !m.isError && m.answer.length > 0)
 
-  // Take last N pairs, then cap by char count
+  // Take last N pairs, then cap by char count.
+  // Iterate newest-to-oldest so the char cap drops OLDEST messages first
+  // (preserving recent context). Reverse the result at the end so callers
+  // receive history in chronological order.
   const recent = completed.slice(-MAX_HISTORY_PAIRS)
 
   const result: HistoryItem[] = []
   let totalChars = 0
 
-  for (const msg of recent) {
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const msg = recent[i]!
     const pairChars = msg.question.length + msg.answer.length
     if (totalChars + pairChars > MAX_HISTORY_CHARS && result.length > 0) {
       break
@@ -184,7 +188,7 @@ export function getContextWindow(entries: ChatEntry[]): HistoryItem[] {
     totalChars += pairChars
   }
 
-  return result
+  return result.reverse()
 }
 
 // ── Helpers for hub ───────────────────────────────────────────────────────────

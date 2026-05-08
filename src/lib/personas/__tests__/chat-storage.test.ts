@@ -170,7 +170,7 @@ describe('getContextWindow', () => {
     expect(result[0]!.question).toBe('Q10')
   })
 
-  it('caps by character count (~20000 chars)', () => {
+  it('caps by character count (~20000 chars) and keeps newest context', () => {
     const longAnswer = 'x'.repeat(10000)
     const entries: ChatEntry[] = [
       { question: 'Q1', answer: longAnswer, timestamp: 1 },
@@ -178,8 +178,10 @@ describe('getContextWindow', () => {
       { question: 'Q3', answer: longAnswer, timestamp: 3 },
     ]
     const result = getContextWindow(entries)
-    // First two would be ~20004 chars, third would push over
-    expect(result.length).toBeLessThanOrEqual(2)
+    // Each message is 10002 chars. Budget is 20000, so only one fits.
+    // Iteration is newest-first, so Q3 is the one preserved (recent context wins).
+    expect(result).toHaveLength(1)
+    expect(result[0]!.question).toBe('Q3')
   })
 
   it('skips streaming and error messages', () => {
