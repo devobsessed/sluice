@@ -76,7 +76,7 @@ describe('PersonaChatDrawer', () => {
 
   it('shows memory indicator', () => {
     renderDrawer()
-    expect(screen.getByText('Remembers last 10 messages')).toBeInTheDocument()
+    expect(screen.getByText('Remembers last 50 exchanges')).toBeInTheDocument()
   })
 
   it('renders input placeholder with persona name', () => {
@@ -472,7 +472,7 @@ describe('PersonaChatDrawer', () => {
 
   it('shows memory indicator text', () => {
     renderDrawer()
-    expect(screen.getByText('Remembers last 10 messages')).toBeInTheDocument()
+    expect(screen.getByText('Remembers last 50 exchanges')).toBeInTheDocument()
   })
 
   it('shows "New thread" button in header when messages exist', () => {
