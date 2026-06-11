@@ -31,16 +31,36 @@ export function registerSearchRag(server: McpServer): void {
       },
     },
     async ({ topic, creator, limit }) => {
-      // Perform hybrid search
-      const { results } = await hybridSearch(topic, { limit: limit ?? 10 })
+      let searchResults: Awaited<ReturnType<typeof hybridSearch>>['results']
 
-      // Filter by creator if provided (case-insensitive)
-      const filtered = creator
-        ? results.filter(r => r.channel?.toLowerCase().includes(creator.toLowerCase()))
-        : results
+      if (creator) {
+        // Resolve the fuzzy creator string to an exact channel name via case-insensitive
+        // substring match. This preserves today's fuzzy ergonomics while moving the filter
+        // inside the query legs (before RRF fusion) so small channels are no longer starved.
+        const channels = await getDistinctChannels()
+        const resolvedChannel = channels.find(
+          c => c.channel.toLowerCase().includes(creator.toLowerCase())
+        )?.channel
+
+        if (!resolvedChannel) {
+          // No channel matched - return empty rather than falling back to global search,
+          // matching the observable behavior of the old post-filter on an unmatched creator.
+          const videos = aggregateByVideo([])
+          return {
+            content: [{ type: 'text', text: JSON.stringify(videos, null, 2) }],
+          }
+        }
+
+        const { results } = await hybridSearch(topic, { limit: limit ?? 10, channel: resolvedChannel })
+        searchResults = results
+      } else {
+        // No creator: global search unchanged
+        const { results } = await hybridSearch(topic, { limit: limit ?? 10 })
+        searchResults = results
+      }
 
       // Aggregate results by video
-      const videos = aggregateByVideo(filtered)
+      const videos = aggregateByVideo(searchResults)
 
       // Enrich with knowledge prompts from insights
       const enrichedVideos = await Promise.all(

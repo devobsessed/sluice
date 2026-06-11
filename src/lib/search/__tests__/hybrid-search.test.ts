@@ -918,6 +918,199 @@ describe('hybridSearch', () => {
     })
   })
 
+  describe('channel filter', () => {
+    it('omitted channel produces global behavior (FIRST test - opt-in guard)', async () => {
+      // When channel is NOT provided, hybridSearch behaves identically to today.
+      // vectorSearch should be called without a channel arg (5th param absent or undefined).
+      vi.mocked(vectorSearch).mockResolvedValue([
+        {
+          chunkId: 1,
+          content: 'Some global content',
+          startTime: 0,
+          endTime: 10,
+          similarity: 0.85,
+          videoId: 1,
+          videoTitle: 'Global Video',
+          channel: 'Channel A',
+          youtubeId: 'vid-1',
+          thumbnail: null,
+          publishedAt: null,
+        },
+      ])
+      mockDb._selectChain.limit.mockResolvedValue([])
+
+      const { results, degraded } = await hybridSearch(
+        'global query',
+        { mode: 'hybrid', limit: 10 },
+        mockDb as unknown as NodePgDatabase<typeof schema>,
+      )
+
+      expect(degraded).toBe(false)
+      expect(Array.isArray(results)).toBe(true)
+
+      // vectorSearch must NOT receive a channel arg (5th param)
+      const vsCall = vi.mocked(vectorSearch).mock.calls[0]
+      expect(vsCall).toBeDefined()
+      expect(vsCall![4]).toBeUndefined()
+    })
+
+    it('channel filter applied in vector mode - forwards channel to vectorSearch', async () => {
+      vi.mocked(vectorSearch).mockResolvedValue([
+        {
+          chunkId: 5,
+          content: 'Small channel content',
+          startTime: 0,
+          endTime: 10,
+          similarity: 0.8,
+          videoId: 5,
+          videoTitle: 'Small Channel Video',
+          channel: 'Small Creator',
+          youtubeId: 'vid-5',
+          thumbnail: null,
+          publishedAt: null,
+        },
+      ])
+
+      const { results, degraded } = await hybridSearch(
+        'specific topic',
+        { mode: 'vector', limit: 10, channel: 'Small Creator' },
+        mockDb as unknown as NodePgDatabase<typeof schema>,
+      )
+
+      expect(degraded).toBe(false)
+      expect(results).toHaveLength(1)
+
+      // vectorSearch MUST receive 'Small Creator' as the 5th positional arg
+      const vsCall = vi.mocked(vectorSearch).mock.calls[0]
+      expect(vsCall).toBeDefined()
+      expect(vsCall![4]).toBe('Small Creator')
+    })
+
+    it('channel filter applied in keyword mode - where clause contains channel filter', async () => {
+      mockDb._selectChain.limit.mockResolvedValue([
+        {
+          chunkId: 10,
+          content: 'Keyword match in small channel',
+          startTime: 0,
+          endTime: 10,
+          similarity: '1.0',
+          videoId: 10,
+          videoTitle: 'Small Channel Video',
+          channel: 'Tiny Creator',
+          youtubeId: 'vid-10',
+          thumbnail: null,
+          publishedAt: null,
+        },
+      ])
+
+      const { results, degraded } = await hybridSearch(
+        'keyword query',
+        { mode: 'keyword', limit: 10, channel: 'Tiny Creator' },
+        mockDb as unknown as NodePgDatabase<typeof schema>,
+      )
+
+      expect(degraded).toBe(false)
+      expect(results).toHaveLength(1)
+      expect(results[0]?.channel).toBe('Tiny Creator')
+
+      // where() must have been called (channel filter ANDed in)
+      expect(mockDb._selectChain.where).toHaveBeenCalled()
+    })
+
+    it('channel filter applied in hybrid mode before fusion - both legs receive channel', async () => {
+      // The filter-before-fusion seam: both vectorSearch AND keywordSearch
+      // must receive the channel filter before RRF fusion runs.
+      vi.mocked(vectorSearch).mockResolvedValue([
+        {
+          chunkId: 20,
+          content: 'Small channel vector result',
+          startTime: 0,
+          endTime: 10,
+          similarity: 0.9,
+          videoId: 20,
+          videoTitle: 'Small Video',
+          channel: 'Niche Creator',
+          youtubeId: 'vid-20',
+          thumbnail: null,
+          publishedAt: null,
+        },
+      ])
+      mockDb._selectChain.limit.mockResolvedValue([
+        {
+          chunkId: 21,
+          content: 'Small channel keyword result',
+          startTime: 5,
+          endTime: 15,
+          similarity: '1.0',
+          videoId: 20,
+          videoTitle: 'Small Video',
+          channel: 'Niche Creator',
+          youtubeId: 'vid-20',
+          thumbnail: null,
+          publishedAt: null,
+        },
+      ])
+
+      const { results, degraded } = await hybridSearch(
+        'hybrid query',
+        { mode: 'hybrid', limit: 10, channel: 'Niche Creator' },
+        mockDb as unknown as NodePgDatabase<typeof schema>,
+      )
+
+      expect(degraded).toBe(false)
+      expect(results.length).toBeGreaterThan(0)
+
+      // Vector leg: vectorSearch 5th param must be the channel
+      const vsCall = vi.mocked(vectorSearch).mock.calls[0]
+      expect(vsCall).toBeDefined()
+      expect(vsCall![4]).toBe('Niche Creator')
+
+      // Keyword leg: where() must have been called (AND'd with channel)
+      expect(mockDb._selectChain.where).toHaveBeenCalled()
+    })
+
+    it('degraded fallback keeps channel scope - no silent global on embedding failure', async () => {
+      // Force both embedding attempts to fail so the fallback path triggers.
+      const mockGenerate = vi.mocked(generateEmbedding)
+      mockGenerate
+        .mockRejectedValueOnce(new Error('protobuf parsing failed'))
+        .mockRejectedValueOnce(new Error('protobuf parsing failed'))
+
+      mockDb._selectChain.limit.mockResolvedValue([
+        {
+          chunkId: 30,
+          content: 'Fallback keyword result for small channel',
+          startTime: 0,
+          endTime: 10,
+          similarity: '1.0',
+          videoId: 30,
+          videoTitle: 'Fallback Video',
+          channel: 'Scoped Creator',
+          youtubeId: 'vid-30',
+          thumbnail: null,
+          publishedAt: null,
+        },
+      ])
+
+      const { results, degraded } = await hybridSearch(
+        'fallback query',
+        { mode: 'hybrid', limit: 10, channel: 'Scoped Creator' },
+        mockDb as unknown as NodePgDatabase<typeof schema>,
+      )
+
+      // Must fall back to keyword (degraded) - not silently go global
+      expect(degraded).toBe(true)
+      expect(results).toHaveLength(1)
+      expect(results[0]?.channel).toBe('Scoped Creator')
+
+      // vectorSearch must NOT have been called (embedding failed before vector leg)
+      expect(vectorSearch).not.toHaveBeenCalled()
+
+      // keyword where() must have been called (channel filter preserved in fallback)
+      expect(mockDb._selectChain.where).toHaveBeenCalled()
+    })
+  })
+
   describe('embedding resilience', () => {
     it('retries embedding once and succeeds on second attempt', async () => {
       const mockGenerate = vi.mocked(generateEmbedding)

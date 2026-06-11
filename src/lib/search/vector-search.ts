@@ -1,4 +1,4 @@
-import { desc, sql, eq } from 'drizzle-orm';
+import { and, desc, sql, eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { db as defaultDb, chunks, videos } from '@/lib/db';
 import type * as schema from '@/lib/db/schema';
@@ -16,13 +16,17 @@ import type { SearchResult } from './types';
  * @param limit - Maximum number of results to return (default: 10)
  * @param threshold - Minimum similarity score (0-1) to include in results (default: 0.3)
  * @param db - Database instance (optional, defaults to singleton)
+ * @param channel - Optional exact-match channel name filter. When provided, restricts
+ *   results to chunks whose video.channel matches exactly. When omitted or null/empty,
+ *   behavior is identical to today's global search.
  * @returns Array of search results ordered by similarity (highest first)
  */
 export async function vectorSearch(
   queryEmbedding: number[],
   limit = 10,
   threshold = 0.3,
-  db: NodePgDatabase<typeof schema> = defaultDb
+  db: NodePgDatabase<typeof schema> = defaultDb,
+  channel?: string | null,
 ): Promise<SearchResult[]> {
   // Validate input
   if (!Array.isArray(queryEmbedding) || queryEmbedding.length !== 384) {
@@ -37,6 +41,11 @@ export async function vectorSearch(
   // Cosine distance: 0 = identical, 2 = opposite
   // Convert to similarity: 1 - (distance / 2) gives 0-1 range
   const similarity = sql<number>`1 - ((${chunks.embedding} <=> ${vectorString}::vector) / 2)`;
+
+  const embeddingGuard = sql`${chunks.embedding} IS NOT NULL`
+  const whereCondition = channel
+    ? and(embeddingGuard, eq(videos.channel, channel))
+    : embeddingGuard
 
   const results = await db
     .select({
@@ -54,7 +63,7 @@ export async function vectorSearch(
     })
     .from(chunks)
     .innerJoin(videos, eq(chunks.videoId, videos.id))
-    .where(sql`${chunks.embedding} IS NOT NULL`)
+    .where(whereCondition)
     .orderBy(desc(similarity))
     .limit(limit);
 

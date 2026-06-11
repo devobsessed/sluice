@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { PersonaChannel } from '@/components/providers/PersonaStatusProvider'
 import { render, screen, waitFor } from '@testing-library/react'
 import { KnowledgeBankContent } from '@/components/knowledge-bank/KnowledgeBankContent'
 
@@ -29,7 +30,7 @@ vi.mock('@/components/layout/PageTitleContext', () => ({
 
 // Mock PersonaStatusProvider
 const mockUsePersonaStatus = vi.fn(() => ({
-  channels: [],
+  channels: [] as PersonaChannel[],
   threshold: 5,
   isLoading: false,
   updateChannel: vi.fn(),

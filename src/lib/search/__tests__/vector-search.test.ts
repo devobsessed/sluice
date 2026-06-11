@@ -427,6 +427,119 @@ describe('vectorSearch', () => {
       ).rejects.toThrow(TypeError)
     })
   })
+
+  describe('channel filter (opt-in)', () => {
+    // FIRST test: omitted channel must not change today's WHERE clause shape
+    it('omitted channel produces today\'s single-condition WHERE', async () => {
+      mockDb._selectChain.limit.mockResolvedValue([])
+      const queryEmbedding = new Array(384).fill(0.1)
+
+      await vectorSearch(
+        queryEmbedding,
+        10,
+        0.3,
+        mockDb as unknown as NodePgDatabase<typeof schema>,
+        // no 5th arg - channel omitted
+      )
+
+      // .where() must be called exactly once with a single condition (no `and(...)`)
+      expect(mockDb._selectChain.where).toHaveBeenCalledTimes(1)
+      const whereArg = mockDb._selectChain.where.mock.calls[0]?.[0] as { queryChunks?: Array<{ value?: string[] }> }
+      // drizzle `and()` wraps: first queryChunk is ['(']
+      // bare sql`` template: first queryChunk is NOT ['(']
+      expect(whereArg).toBeDefined()
+      expect(whereArg.queryChunks?.[0]?.value).not.toEqual(['('])
+    })
+
+    it('accepts channel argument and returns results unchanged', async () => {
+      const scopedRows = [
+        {
+          chunkId: 1,
+          content: 'Small channel content',
+          startTime: 0,
+          endTime: 10,
+          similarity: 0.8,
+          videoId: 1,
+          videoTitle: 'Tiny Creator Video',
+          channel: 'Tiny Creator',
+          youtubeId: 'tiny-vid-1',
+          thumbnail: null,
+          publishedAt: null,
+        },
+      ]
+      mockDb._selectChain.limit.mockResolvedValue(scopedRows)
+      const queryEmbedding = new Array(384).fill(0.1)
+
+      const results = await vectorSearch(
+        queryEmbedding,
+        10,
+        0.3,
+        mockDb as unknown as NodePgDatabase<typeof schema>,
+        'Tiny Creator',
+      )
+
+      expect(results).toHaveLength(1)
+      expect(results[0]?.channel).toBe('Tiny Creator')
+      expect(results[0]?.content).toBe('Small channel content')
+    })
+
+    it('channel filter uses AND with the embedding-not-null guard', async () => {
+      mockDb._selectChain.limit.mockResolvedValue([])
+      const queryEmbedding = new Array(384).fill(0.1)
+
+      await vectorSearch(
+        queryEmbedding,
+        10,
+        0.3,
+        mockDb as unknown as NodePgDatabase<typeof schema>,
+        'Some Channel',
+      )
+
+      expect(mockDb._selectChain.where).toHaveBeenCalledTimes(1)
+      const whereArg = mockDb._selectChain.where.mock.calls[0]?.[0] as { queryChunks?: Array<{ value?: string[] }> }
+      // drizzle `and()` wraps its conditions with outer queryChunks: ['(', inner, ')']
+      // A bare sql`` tag has 1 queryChunk with the raw template string.
+      // Compound: queryChunks[0].value is ['(']
+      expect(whereArg).toBeDefined()
+      expect(whereArg.queryChunks?.[0]?.value).toEqual(['('])
+    })
+
+    it('null channel is treated identically to omitted channel', async () => {
+      mockDb._selectChain.limit.mockResolvedValue([])
+      const queryEmbedding = new Array(384).fill(0.1)
+
+      await vectorSearch(
+        queryEmbedding,
+        10,
+        0.3,
+        mockDb as unknown as NodePgDatabase<typeof schema>,
+        null,
+      )
+
+      expect(mockDb._selectChain.where).toHaveBeenCalledTimes(1)
+      const whereArg = mockDb._selectChain.where.mock.calls[0]?.[0] as { queryChunks?: Array<{ value?: string[] }> }
+      // Single-condition WHERE: first queryChunk is NOT '('
+      expect(whereArg.queryChunks?.[0]?.value).not.toEqual(['('])
+    })
+
+    it('empty-string channel is treated as omitted (no filter)', async () => {
+      mockDb._selectChain.limit.mockResolvedValue([])
+      const queryEmbedding = new Array(384).fill(0.1)
+
+      await vectorSearch(
+        queryEmbedding,
+        10,
+        0.3,
+        mockDb as unknown as NodePgDatabase<typeof schema>,
+        '',
+      )
+
+      expect(mockDb._selectChain.where).toHaveBeenCalledTimes(1)
+      const whereArg = mockDb._selectChain.where.mock.calls[0]?.[0] as { queryChunks?: Array<{ value?: string[] }> }
+      // Single-condition WHERE: first queryChunk is NOT '('
+      expect(whereArg.queryChunks?.[0]?.value).not.toEqual(['('])
+    })
+  })
 })
 
 describe('searchByQuery', () => {

@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { InsightsPanel } from '../InsightsPanel';
 import type { ExtractionResult } from '@/lib/claude/prompts/types';
 

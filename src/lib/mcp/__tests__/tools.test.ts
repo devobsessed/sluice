@@ -96,6 +96,21 @@ describe('registerSearchRag', () => {
     )
   })
 
+  // FIRST test - global path unchanged when no creator provided
+  it('search_rag without creator is global and unchanged', async () => {
+    const mockSearchResults: SearchResult[] = []
+    const mockVideoResults: VideoResult[] = []
+
+    ;(hybridSearch as Mock).mockResolvedValue({ results: mockSearchResults, degraded: false })
+    ;(aggregateByVideo as Mock).mockReturnValue(mockVideoResults)
+
+    await toolHandler({ topic: 'TypeScript' })
+
+    // No creator: hybridSearch called with limit only, no channel, no resolution
+    expect(hybridSearch).toHaveBeenCalledWith('TypeScript', { limit: 10 })
+    expect(getDistinctChannels).not.toHaveBeenCalled()
+  })
+
   it('searches knowledge base with topic only', async () => {
     const mockSearchResults: SearchResult[] = [
       {
@@ -142,7 +157,11 @@ describe('registerSearchRag', () => {
     })
   })
 
-  it('filters by creator when provided', async () => {
+  it('search_rag resolves creator to exact channel and scopes search', async () => {
+    const mockChannels = [
+      { channel: 'Dev Channel', videoCount: 10 },
+      { channel: 'JS Channel', videoCount: 5 },
+    ]
     const mockSearchResults: SearchResult[] = [
       {
         chunkId: 1,
@@ -157,21 +176,7 @@ describe('registerSearchRag', () => {
         thumbnail: 'https://example.com/thumb1.jpg',
         publishedAt: null,
       },
-      {
-        chunkId: 2,
-        content: 'React state',
-        startTime: 0,
-        endTime: 10,
-        similarity: 0.8,
-        videoId: 2,
-        videoTitle: 'React Advanced',
-        channel: 'JS Channel',
-        youtubeId: 'def456',
-        thumbnail: 'https://example.com/thumb2.jpg',
-        publishedAt: null,
-      },
     ]
-
     const mockVideoResults: VideoResult[] = [
       {
         videoId: 1,
@@ -189,54 +194,68 @@ describe('registerSearchRag', () => {
       },
     ]
 
+    ;(getDistinctChannels as Mock).mockResolvedValue(mockChannels)
     ;(hybridSearch as Mock).mockResolvedValue({ results: mockSearchResults, degraded: false })
     ;(aggregateByVideo as Mock).mockReturnValue(mockVideoResults)
 
     const result = await toolHandler({ topic: 'React', creator: 'Dev' })
 
-    expect(hybridSearch).toHaveBeenCalledWith('React', { limit: 10 })
-    // aggregateByVideo should be called with filtered results (only Dev Channel)
-    expect(aggregateByVideo).toHaveBeenCalledWith([mockSearchResults[0]])
+    // Resolution step ran
+    expect(getDistinctChannels).toHaveBeenCalledTimes(1)
+    // hybridSearch called with resolved exact channel name
+    expect(hybridSearch).toHaveBeenCalledWith('React', { limit: 10, channel: 'Dev Channel' })
+    // aggregateByVideo receives scoped results directly (no post-filter)
+    expect(aggregateByVideo).toHaveBeenCalledWith(mockSearchResults)
     expect(result).toEqual({
       content: [{ type: 'text', text: JSON.stringify(mockVideoResults, null, 2) }],
     })
   })
 
-  it('filters by creator case-insensitively', async () => {
-    const mockSearchResults: SearchResult[] = [
-      {
-        chunkId: 1,
-        content: 'Content',
-        startTime: 0,
-        endTime: 10,
-        similarity: 0.9,
-        videoId: 1,
-        videoTitle: 'Video 1',
-        channel: 'JavaScript Mastery',
-        youtubeId: 'abc123',
-        thumbnail: null,
-      },
-      {
-        chunkId: 2,
-        content: 'Content',
-        startTime: 0,
-        endTime: 10,
-        similarity: 0.8,
-        videoId: 2,
-        videoTitle: 'Video 2',
-        channel: 'Python Pro',
-        youtubeId: 'def456',
-        thumbnail: null,
-      },
+  it('search_rag creator resolution is case-insensitive substring', async () => {
+    const mockChannels = [
+      { channel: 'JavaScript Mastery', videoCount: 20 },
+      { channel: 'Python Pro', videoCount: 8 },
     ]
 
-    ;(hybridSearch as Mock).mockResolvedValue({ results: mockSearchResults, degraded: false })
+    ;(getDistinctChannels as Mock).mockResolvedValue(mockChannels)
+    ;(hybridSearch as Mock).mockResolvedValue({ results: [], degraded: false })
     ;(aggregateByVideo as Mock).mockReturnValue([])
 
     await toolHandler({ topic: 'test', creator: 'MASTERY' })
 
-    // Should filter to only JavaScript Mastery (case-insensitive)
-    expect(aggregateByVideo).toHaveBeenCalledWith([mockSearchResults[0]])
+    // 'MASTERY' should match 'JavaScript Mastery' case-insensitively
+    expect(hybridSearch).toHaveBeenCalledWith('test', { limit: 10, channel: 'JavaScript Mastery' })
+  })
+
+  it('search_rag with unresolvable creator returns empty, hybridSearch not called with bogus channel', async () => {
+    const mockChannels = [
+      { channel: 'Channel A', videoCount: 5 },
+    ]
+
+    ;(getDistinctChannels as Mock).mockResolvedValue(mockChannels)
+    ;(aggregateByVideo as Mock).mockReturnValue([])
+
+    const result = await toolHandler({ topic: 'test', creator: 'Channel B' })
+
+    // No channel resolved - hybridSearch should not be called at all
+    expect(hybridSearch).not.toHaveBeenCalled()
+    // Result should be empty
+    expect(aggregateByVideo).toHaveBeenCalledWith([])
+    expect(result.content[0]?.text).toContain('[]')
+  })
+
+  it('respects custom limit parameter with creator', async () => {
+    const mockChannels = [
+      { channel: 'Dev Channel', videoCount: 10 },
+    ]
+
+    ;(getDistinctChannels as Mock).mockResolvedValue(mockChannels)
+    ;(hybridSearch as Mock).mockResolvedValue({ results: [], degraded: false })
+    ;(aggregateByVideo as Mock).mockReturnValue([])
+
+    await toolHandler({ topic: 'test', creator: 'Dev', limit: 25 })
+
+    expect(hybridSearch).toHaveBeenCalledWith('test', { limit: 25, channel: 'Dev Channel' })
   })
 
   it('respects custom limit parameter', async () => {
@@ -273,31 +292,6 @@ describe('registerSearchRag', () => {
     expect(result).toEqual({
       content: [{ type: 'text', text: JSON.stringify([], null, 2) }],
     })
-  })
-
-  it('filters out all results when creator does not match', async () => {
-    const mockSearchResults: SearchResult[] = [
-      {
-        chunkId: 1,
-        content: 'Content',
-        startTime: 0,
-        endTime: 10,
-        similarity: 0.9,
-        videoId: 1,
-        videoTitle: 'Video 1',
-        channel: 'Channel A',
-        youtubeId: 'abc123',
-        thumbnail: null,
-      },
-    ]
-
-    ;(hybridSearch as Mock).mockResolvedValue({ results: mockSearchResults, degraded: false })
-    ;(aggregateByVideo as Mock).mockReturnValue([])
-
-    await toolHandler({ topic: 'test', creator: 'Channel B' })
-
-    // Should filter out all results
-    expect(aggregateByVideo).toHaveBeenCalledWith([])
   })
 
   it('handles null thumbnail gracefully', async () => {

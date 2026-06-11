@@ -56,7 +56,7 @@ describe('DELETE /api/channels/[id]', () => {
     } as never)
 
     // Transaction mock: callback receives tx with delete method
-    mockDb.transaction.mockImplementation(async (cb: (tx: unknown) => Promise<unknown>) => {
+    mockDb.transaction.mockImplementation((async (cb: (tx: unknown) => Promise<unknown>) => {
       const txDelete = vi.fn()
         .mockReturnValueOnce({
           where: vi.fn().mockReturnValue({
@@ -67,7 +67,7 @@ describe('DELETE /api/channels/[id]', () => {
           where: vi.fn().mockResolvedValue(undefined),
         })
       return cb({ delete: txDelete })
-    })
+    }) as never)
 
     const response = await DELETE(
       new Request('http://localhost/api/channels/1'),
@@ -98,7 +98,7 @@ describe('DELETE /api/channels/[id]', () => {
 
     const discoveryDeleteWhereFn = vi.fn().mockResolvedValue(undefined)
 
-    mockDb.transaction.mockImplementation(async (cb: (tx: unknown) => Promise<unknown>) => {
+    mockDb.transaction.mockImplementation((async (cb: (tx: unknown) => Promise<unknown>) => {
       const txDelete = vi.fn()
         .mockReturnValueOnce({
           where: vi.fn().mockReturnValue({
@@ -109,7 +109,7 @@ describe('DELETE /api/channels/[id]', () => {
           where: discoveryDeleteWhereFn,
         })
       return cb({ delete: txDelete })
-    })
+    }) as never)
 
     await DELETE(
       new Request('http://localhost/api/channels/42'),
@@ -127,7 +127,7 @@ describe('DELETE /api/channels/[id]', () => {
       }),
     } as never)
 
-    mockDb.transaction.mockImplementation(async (cb: (tx: unknown) => Promise<unknown>) => {
+    mockDb.transaction.mockImplementation((async (cb: (tx: unknown) => Promise<unknown>) => {
       const txDelete = vi.fn()
         .mockReturnValueOnce({
           where: vi.fn().mockReturnValue({
@@ -138,7 +138,7 @@ describe('DELETE /api/channels/[id]', () => {
           where: vi.fn().mockResolvedValue(undefined),
         })
       return cb({ delete: txDelete })
-    })
+    }) as never)
 
     const response = await DELETE(
       new Request('http://localhost/api/channels/1'),

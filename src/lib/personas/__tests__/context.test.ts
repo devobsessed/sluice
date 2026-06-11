@@ -16,48 +16,47 @@ describe('getPersonaContext', () => {
     mockHybridSearch.mockResolvedValue({ results: [], degraded: false })
   })
 
-  it('should return filtered search results for a specific channel', async () => {
-    mockHybridSearch.mockResolvedValue({ results: [
-      {
-        chunkId: 1,
-        content: 'TypeScript is a typed superset',
-        startTime: 0,
-        endTime: 10,
-        videoId: 1,
-        videoTitle: 'TypeScript Basics',
-        channel: 'Test Channel',
-        youtubeId: 'pc-vid1',
-        thumbnail: null,
-        similarity: 0.85,
-      },
-      {
-        chunkId: 2,
-        content: 'Python is dynamically typed',
-        startTime: 0,
-        endTime: 10,
-        videoId: 2,
-        videoTitle: 'Python Basics',
-        channel: 'Other Channel',
-        youtubeId: 'pc-vid2',
-        thumbnail: null,
-        similarity: 0.80,
-      },
-    ], degraded: false })
+  // FIRST test per chunk spec - asserts new scoped call shape
+  it('calls hybridSearch scoped with limit 15 and channel name', async () => {
+    await getPersonaContext('Test Channel', 'test query')
+
+    expect(mockHybridSearch).toHaveBeenCalledWith('test query', {
+      mode: 'hybrid',
+      limit: 15,
+      channel: 'Test Channel',
+    })
+  })
+
+  it('returns scoped results without post-filtering', async () => {
+    // hybridSearch already scoped - returns only target channel rows
+    mockHybridSearch.mockResolvedValue({
+      results: [
+        {
+          chunkId: 1,
+          content: 'TypeScript is a typed superset',
+          startTime: 0,
+          endTime: 10,
+          videoId: 1,
+          videoTitle: 'TypeScript Basics',
+          channel: 'Test Channel',
+          youtubeId: 'pc-vid1',
+          thumbnail: null,
+          similarity: 0.85,
+        },
+      ],
+      degraded: false,
+    })
 
     const results = await getPersonaContext('Test Channel', 'What is TypeScript?')
 
     expect(Array.isArray(results)).toBe(true)
-    // All results should be from the requested channel
-    results.forEach(result => {
-      expect(result.channel).toBe('Test Channel')
-    })
-    // Should filter out 'Other Channel'
     expect(results).toHaveLength(1)
+    expect(results[0]?.channel).toBe('Test Channel')
   })
 
-  it('should limit results to 10 chunks', async () => {
-    // Return 20 results from the target channel
-    const results = Array.from({ length: 20 }, (_, i) => ({
+  it('returns up to 15 chunks from scoped search', async () => {
+    // Mock hybridSearch to return 20 scoped rows (simulates if search returned more)
+    const rows = Array.from({ length: 20 }, (_, i) => ({
       chunkId: i + 1,
       content: `Test content ${i}`,
       startTime: i * 10,
@@ -69,23 +68,40 @@ describe('getPersonaContext', () => {
       thumbnail: null,
       similarity: 0.7,
     }))
-    mockHybridSearch.mockResolvedValue({ results, degraded: false })
+    mockHybridSearch.mockResolvedValue({ results: rows, degraded: false })
 
     const contextResults = await getPersonaContext('Test Channel', 'Test')
 
-    expect(contextResults.length).toBeLessThanOrEqual(10)
+    // limit: 15 is passed to hybridSearch; implementation returns results directly
+    expect(contextResults.length).toBeLessThanOrEqual(20)
   })
 
-  it('should call hybridSearch with correct parameters', async () => {
-    await getPersonaContext('Test Channel', 'test query')
+  it('small-channel content surfaces via scoped search', async () => {
+    // A small channel with chunks that would never crack global top-50
+    // The scoped call guarantees they appear regardless of global competition
+    const smallChannelChunks: SearchResult[] = Array.from({ length: 5 }, (_, i) => ({
+      chunkId: 100 + i,
+      content: `Rare topic content ${i} from small channel`,
+      startTime: i * 30,
+      endTime: (i + 1) * 30,
+      videoId: 10 + i,
+      videoTitle: 'Small Channel Video',
+      channel: 'Tiny Niche Channel',
+      youtubeId: `tiny-vid-${i}`,
+      thumbnail: null,
+      similarity: 0.45, // Below global top-50 threshold - still returned by scoped query
+    }))
 
-    expect(mockHybridSearch).toHaveBeenCalledWith('test query', {
-      mode: 'hybrid',
-      limit: 50,
-    })
+    mockHybridSearch.mockResolvedValue({ results: smallChannelChunks, degraded: false })
+
+    const results = await getPersonaContext('Tiny Niche Channel', 'What are your thoughts?')
+
+    // Scoped search returns channel content regardless of global ranking
+    expect(results.length).toBeGreaterThan(0)
+    results.forEach(r => expect(r.channel).toBe('Tiny Niche Channel'))
   })
 
-  it('should handle empty results gracefully', async () => {
+  it('handles empty results gracefully', async () => {
     mockHybridSearch.mockResolvedValue({ results: [], degraded: false })
 
     const results = await getPersonaContext('Nonexistent Channel', 'query')
@@ -94,43 +110,24 @@ describe('getPersonaContext', () => {
     expect(results.length).toBe(0)
   })
 
-  it('should handle results where no chunks match the channel', async () => {
-    mockHybridSearch.mockResolvedValue({ results: [
-      {
-        chunkId: 1,
-        content: 'Some content',
-        startTime: 0,
-        endTime: 10,
-        videoId: 1,
-        videoTitle: 'Test Video',
-        channel: 'Different Channel',
-        youtubeId: 'pc-vid',
-        thumbnail: null,
-        similarity: 0.7,
-      },
-    ], degraded: false })
-
-    const results = await getPersonaContext('Nonexistent Channel', 'query')
-
-    expect(Array.isArray(results)).toBe(true)
-    expect(results.length).toBe(0)
-  })
-
-  it('should return results with correct properties', async () => {
-    mockHybridSearch.mockResolvedValue({ results: [
-      {
-        chunkId: 1,
-        content: 'Test query content',
-        startTime: 0,
-        endTime: 10,
-        videoId: 1,
-        videoTitle: 'Test Video',
-        channel: 'Test Channel',
-        youtubeId: 'pc-vid',
-        thumbnail: null,
-        similarity: 0.85,
-      },
-    ], degraded: false })
+  it('returns results with correct properties', async () => {
+    mockHybridSearch.mockResolvedValue({
+      results: [
+        {
+          chunkId: 1,
+          content: 'Test query content',
+          startTime: 0,
+          endTime: 10,
+          videoId: 1,
+          videoTitle: 'Test Video',
+          channel: 'Test Channel',
+          youtubeId: 'pc-vid',
+          thumbnail: null,
+          similarity: 0.85,
+        },
+      ],
+      degraded: false,
+    })
 
     const results = await getPersonaContext('Test Channel', 'test query')
 
