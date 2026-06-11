@@ -15,7 +15,10 @@ import {
   usePersonaChat,
   isThreadBoundary,
   isChatMessage,
+  type SourceChunk,
 } from '@/hooks/usePersonaChat'
+import { SourceCitation } from './SourceCitation'
+import { PersonaActionsMenu } from './PersonaActionsMenu'
 import { cn } from '@/lib/utils'
 
 interface PersonaChatDrawerProps {
@@ -57,6 +60,133 @@ function formatTimestamp(ts: number): string {
   }).format(new Date(ts))
 }
 
+/**
+ * Splits answer text into segments: plain text and [n] citation markers.
+ * Returns an array of { type: 'text' | 'citation', value: string, index: number }.
+ */
+interface TextSegment {
+  type: 'text'
+  value: string
+}
+interface CitationSegment {
+  type: 'citation'
+  n: number
+}
+type AnswerSegment = TextSegment | CitationSegment
+
+function parseAnswerSegments(text: string): AnswerSegment[] {
+  const CITATION_RE = /\[(\d+)\]/g
+  const segments: AnswerSegment[] = []
+  let lastIdx = 0
+  let match: RegExpExecArray | null
+
+  while ((match = CITATION_RE.exec(text)) !== null) {
+    if (match.index > lastIdx) {
+      segments.push({ type: 'text', value: text.slice(lastIdx, match.index) })
+    }
+    segments.push({ type: 'citation', n: parseInt(match[1]!, 10) })
+    lastIdx = match.index + match[0].length
+  }
+
+  if (lastIdx < text.length) {
+    segments.push({ type: 'text', value: text.slice(lastIdx) })
+  }
+
+  return segments
+}
+
+interface AnswerTextProps {
+  text: string
+  isStreaming?: boolean
+  liveSources: SourceChunk[] | null
+  onCitationClick: (n: number) => void
+}
+
+/**
+ * Renders the answer text, parsing [n] markers into:
+ * - Clickable affordances when liveSources is present (live turn)
+ * - De-emphasized non-clickable text when liveSources is null (historical)
+ * Out-of-range [n] markers are rendered as de-emphasized text (clamped away).
+ */
+function AnswerText({ text, isStreaming, liveSources, onCitationClick }: AnswerTextProps) {
+  const paragraphs = text.split('\n\n')
+
+  return (
+    <div className="space-y-2">
+      {paragraphs.map((paragraph, pIdx, arr) => {
+        const segments = parseAnswerSegments(paragraph)
+        const isLast = pIdx === arr.length - 1
+
+        // Check if this paragraph actually has citation markers
+        const hasParagraphCitations = segments.some((s) => s.type === 'citation')
+
+        if (!hasParagraphCitations) {
+          // No citations in this paragraph - render plain text directly in <p>
+          // so existing tests asserting tagName === 'P' stay green
+          return (
+            <p key={pIdx}>
+              {paragraph}
+              {isStreaming && isLast && (
+                <span className="motion-safe:animate-pulse">▌</span>
+              )}
+            </p>
+          )
+        }
+
+        return (
+          <p key={pIdx}>
+            {segments.map((seg, sIdx) => {
+              if (seg.type === 'text') {
+                return <span key={sIdx}>{seg.value}</span>
+              }
+
+              // Citation segment
+              const n = seg.n
+              const sourceIndex = n - 1 // 0-based
+              const isInRange = liveSources != null && sourceIndex >= 0 && sourceIndex < liveSources.length
+
+              if (liveSources != null && isInRange) {
+                // Live turn: clickable affordance
+                return (
+                  <button
+                    key={sIdx}
+                    type="button"
+                    onClick={() => onCitationClick(sourceIndex)}
+                    aria-label={`[${n}]`}
+                    className="inline text-primary text-xs font-mono hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-primary rounded-sm px-0.5"
+                  >
+                    [{n}]
+                  </button>
+                )
+              }
+
+              // Historical or out-of-range: de-emphasized non-clickable text
+              return (
+                <span
+                  key={sIdx}
+                  className="text-xs font-mono text-muted-foreground/50"
+                >
+                  [{n}]
+                </span>
+              )
+            })}
+            {isStreaming && isLast && (
+              <span className="motion-safe:animate-pulse">▌</span>
+            )}
+          </p>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * Returns true if the given answer text contains any [n] citation markers.
+ */
+function hasCitations(text: string): boolean {
+  return /\[\d+\]/.test(text)
+}
+
 export function PersonaChatDrawer({
   open,
   onOpenChange,
@@ -66,10 +196,14 @@ export function PersonaChatDrawer({
   embedded = false,
   onBack,
 }: PersonaChatDrawerProps) {
-  const { state, sendMessage, clearHistory, startNewThread } = usePersonaChat(personaId)
+  const { state, liveSources, sendMessage, clearHistory, startNewThread } = usePersonaChat(personaId)
   const [inputValue, setInputValue] = useState('')
   const threadRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  // Which source index to highlight in the SourceCitation list
+  const [highlightIndex, setHighlightIndex] = useState<number | undefined>(undefined)
+  // Track which message index is the "live" one (the last non-historical message)
+  const lastMessageIdx = state.entries.length - 1
 
   const topicLabel =
     expertiseTopics && expertiseTopics.length > 0
@@ -133,6 +267,10 @@ export function PersonaChatDrawer({
 
   function handleRetry(question: string) {
     void sendMessage(question)
+  }
+
+  function handleCitationClick(sourceIndex: number) {
+    setHighlightIndex(sourceIndex)
   }
 
   const hasMessages = state.messages.length > 0
@@ -200,6 +338,12 @@ export function PersonaChatDrawer({
             <Trash2 />
           </Button>
         )}
+
+        {/* Persona-level actions menu (always visible, extensible) */}
+        <PersonaActionsMenu
+          personaId={personaId}
+          personaName={personaName}
+        />
       </SheetHeader>
 
       {/* Message Thread */}
@@ -237,6 +381,12 @@ export function PersonaChatDrawer({
 
           const msg = entry
           const isDimmed = lastBoundaryIdx !== -1 && idx < lastBoundaryIdx
+          // The last message entry is the "live" one when liveSources is present
+          const isLiveMessage = idx === lastMessageIdx && liveSources != null
+
+          // Determine if this message has [n] markers we can show sources for
+          const messageHasCitations = hasCitations(msg.answer)
+          const showSourceCitation = isLiveMessage && messageHasCitations
 
           return (
             <div
@@ -261,7 +411,7 @@ export function PersonaChatDrawer({
               {/* Persona answer bubble */}
               <div className="flex items-end gap-2">
                 <PersonaAvatar name={personaName} className="size-6 text-xs" />
-                <div className="max-w-[80%] px-4 py-2 rounded-2xl rounded-bl-md bg-muted text-sm">
+                <div className="max-w-[80%] flex-1 px-4 py-2 rounded-2xl rounded-bl-md bg-muted text-sm">
                   {msg.isError ? (
                     <span className="flex items-center gap-1.5 text-destructive">
                       <AlertCircle className="size-4 shrink-0" />
@@ -280,19 +430,26 @@ export function PersonaChatDrawer({
                       />
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      {msg.answer.split('\n\n').map((paragraph, pIdx, arr) => (
-                        <p key={pIdx}>
-                          {paragraph}
-                          {msg.isStreaming && pIdx === arr.length - 1 && (
-                            <span className="motion-safe:animate-pulse">▌</span>
-                          )}
-                        </p>
-                      ))}
-                    </div>
+                    <AnswerText
+                      text={msg.answer}
+                      isStreaming={msg.isStreaming}
+                      liveSources={isLiveMessage ? liveSources : null}
+                      onCitationClick={handleCitationClick}
+                    />
                   )}
                 </div>
               </div>
+
+              {/* SourceCitation list — only for the live turn that has citations */}
+              {showSourceCitation && (
+                <div className="ml-8">
+                  <SourceCitation
+                    sources={liveSources}
+                    highlightIndex={highlightIndex}
+                    forceOpen={false}
+                  />
+                </div>
+              )}
             </div>
           )
         })}

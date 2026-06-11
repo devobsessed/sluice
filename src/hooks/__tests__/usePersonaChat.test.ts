@@ -733,7 +733,176 @@ describe('usePersonaChat', () => {
     )
   })
 
-  // ── 14. Abort on persona switch ───────────────────────────────────────────
+  // ── 14. liveSources — transient sources from /query SSE stream ───────────
+
+  it('hook captures sources into liveSources transient state', async () => {
+    const mockSources = [
+      {
+        chunkId: 1,
+        content: 'TypeScript is a typed superset of JavaScript.',
+        videoTitle: 'Intro to TypeScript',
+        startTime: 10,
+        youtubeId: 'abc123',
+      },
+    ]
+    mockFetch.mockResolvedValue(
+      mockSseResponse([
+        {
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: 'Answer' },
+        },
+        { type: 'sources', chunks: mockSources },
+        { type: 'done' },
+      ])
+    )
+
+    const { result } = renderHook(() => usePersonaChat(PERSONA_ID))
+
+    await act(async () => {
+      await result.current.sendMessage('What is TypeScript?')
+    })
+
+    await waitFor(() => {
+      expect(result.current.liveSources).toEqual(mockSources)
+    })
+  })
+
+  it('hook resets liveSources at the start of each sendMessage', async () => {
+    const firstSources = [
+      {
+        chunkId: 1,
+        content: 'First source content.',
+        videoTitle: 'First Video',
+        startTime: 5,
+        youtubeId: 'vid1',
+      },
+    ]
+    const secondSources = [
+      {
+        chunkId: 2,
+        content: 'Second source content.',
+        videoTitle: 'Second Video',
+        startTime: 15,
+        youtubeId: 'vid2',
+      },
+    ]
+
+    mockFetch.mockResolvedValueOnce(
+      mockSseResponse([
+        { type: 'sources', chunks: firstSources },
+        { type: 'done' },
+      ])
+    )
+    mockFetch.mockResolvedValueOnce(
+      mockSseResponse([
+        { type: 'sources', chunks: secondSources },
+        { type: 'done' },
+      ])
+    )
+
+    const { result } = renderHook(() => usePersonaChat(PERSONA_ID))
+
+    await act(async () => {
+      await result.current.sendMessage('First question')
+    })
+
+    await waitFor(() => {
+      expect(result.current.liveSources).toEqual(firstSources)
+    })
+
+    await act(async () => {
+      await result.current.sendMessage('Second question')
+    })
+
+    await waitFor(() => {
+      expect(result.current.liveSources).toEqual(secondSources)
+    })
+  })
+
+  it('hook does not persist sources to localStorage', async () => {
+    const mockSources = [
+      {
+        chunkId: 1,
+        content: 'Source content.',
+        videoTitle: 'Some Video',
+        startTime: 0,
+        youtubeId: 'xyz',
+      },
+    ]
+    mockFetch.mockResolvedValue(
+      mockSseResponse([
+        { type: 'sources', chunks: mockSources },
+        { type: 'done' },
+      ])
+    )
+
+    const { result } = renderHook(() => usePersonaChat(PERSONA_ID))
+
+    await act(async () => {
+      await result.current.sendMessage('Test')
+    })
+
+    await waitFor(() => {
+      const stored = localStorageMock.getItem(STORAGE_KEY)
+      if (stored !== null) {
+        const parsed = JSON.parse(stored) as {
+          version: number
+          entries: Array<Record<string, unknown>>
+        }
+        // None of the stored entries should contain a sources field
+        for (const entry of parsed.entries) {
+          expect(entry).not.toHaveProperty('sources')
+          expect(entry).not.toHaveProperty('liveSources')
+        }
+      }
+    })
+  })
+
+  it('done and content_block_delta events still parse unchanged when sources event is present', async () => {
+    mockFetch.mockResolvedValue(
+      mockSseResponse([
+        {
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: 'The answer is 42' },
+        },
+        {
+          type: 'sources',
+          chunks: [
+            {
+              chunkId: 10,
+              content: 'Context chunk',
+              videoTitle: 'Some Video',
+              startTime: null,
+              youtubeId: null,
+            },
+          ],
+        },
+        { type: 'done' },
+      ])
+    )
+
+    const { result } = renderHook(() => usePersonaChat(PERSONA_ID))
+
+    await act(async () => {
+      await result.current.sendMessage('What is the answer?')
+    })
+
+    await waitFor(() => {
+      const msg = result.current.state.messages[0]
+      expect(msg?.answer).toBe('The answer is 42')
+      expect(msg?.isStreaming).toBe(false)
+      expect(result.current.state.error).toBeNull()
+    })
+  })
+
+  it('liveSources is null initially', () => {
+    const { result } = renderHook(() => usePersonaChat(PERSONA_ID))
+    expect(result.current.liveSources).toBeNull()
+  })
+
+  // ── 15. Abort on persona switch ───────────────────────────────────────────
 
   it('aborts in-flight request and resets streaming state when personaId changes', async () => {
     // Stream that never ends

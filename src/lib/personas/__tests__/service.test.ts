@@ -4,6 +4,7 @@ import {
   extractExpertiseTopics,
   computeExpertiseEmbedding,
   createPersona,
+  regeneratePersonaSystemPrompt,
 } from '../service'
 import { db } from '@/lib/db'
 import { generateText } from '@/lib/claude/client'
@@ -345,5 +346,179 @@ describe('createPersona', () => {
     const persona = await createPersona(channelName)
 
     expect(persona.name).toBe('Test Creator')
+  })
+})
+
+// --- Chunk 2: v2 persona generation + regenerate ---
+
+describe('generatePersonaSystemPrompt - v2 sampling', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('samples more than 5 transcripts and caps combined length near 30k chars', async () => {
+    const channelName = 'Test Creator'
+    let capturedLimit: number | undefined
+
+    // Build a transcript that is long enough to verify the 30k cap
+    const longTranscript = 'a'.repeat(4000)
+
+    mockDb.select.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockImplementation((n: number) => {
+            capturedLimit = n
+            // Return 20 transcripts to prove limit(20) is called
+            return Promise.resolve(
+              Array.from({ length: 20 }, () => ({ transcript: longTranscript }))
+            )
+          }),
+        }),
+      }),
+    } as never)
+
+    mockGenerateText.mockResolvedValue('Generated v2 persona prompt')
+
+    await generatePersonaSystemPrompt(channelName)
+
+    // Must request at least 20 transcripts
+    expect(capturedLimit).toBeGreaterThanOrEqual(20)
+
+    // Must pass combined text to Claude; verify it is capped near 30k chars
+    const promptArg = mockGenerateText.mock.calls[0]?.[0] as string
+    // The combined transcript is 20 * 4000 = 80k chars; cap must apply (~30k)
+    expect(promptArg.length).toBeLessThan(40000)
+  })
+
+  it('analysis prompt requests the v2 document fields', async () => {
+    const channelName = 'Test Creator'
+
+    mockDb.select.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([
+            { transcript: 'Sample transcript about React...' },
+          ]),
+        }),
+      }),
+    } as never)
+
+    mockGenerateText.mockResolvedValue('Generated v2 persona prompt')
+
+    await generatePersonaSystemPrompt(channelName)
+
+    const promptArg = mockGenerateText.mock.calls[0]?.[0] as string
+
+    // Must request all v2 document fields
+    const promptLower = promptArg.toLowerCase()
+    expect(promptLower).toMatch(/voice|tone/)
+    expect(promptLower).toMatch(/opinion|takes/)
+    expect(promptLower).toMatch(/pet peeve/)
+    expect(promptLower).toMatch(/basic question/)
+    expect(promptLower).toMatch(/socratic|lecture/)
+  })
+})
+
+describe('regeneratePersonaSystemPrompt', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('updates existing persona systemPrompt and preserves id', async () => {
+    const channelName = 'Test Creator'
+    const existingId = 42
+
+    // Mock transcript fetch for generatePersonaSystemPrompt
+    mockDb.select.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([
+            { transcript: 'Sample transcript...' },
+          ]),
+        }),
+      }),
+    } as never)
+
+    mockGenerateText.mockResolvedValue('Updated v2 system prompt')
+
+    const updatedPersona = {
+      id: existingId,
+      channelName,
+      name: channelName,
+      systemPrompt: 'Updated v2 system prompt',
+      expertiseTopics: ['React'],
+      expertiseEmbedding: new Array(384).fill(0.1),
+      transcriptCount: 5,
+      createdAt: new Date(),
+    }
+
+    // Mock db.update chain
+    mockDb.update = vi.fn().mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([updatedPersona]),
+        }),
+      }),
+    })
+
+    const result = await regeneratePersonaSystemPrompt(channelName)
+
+    expect(result.id).toBe(existingId)
+    expect(result.systemPrompt).toBe('Updated v2 system prompt')
+    expect(mockDb.update).toHaveBeenCalled()
+    // Must NOT call insert
+    expect(mockDb.insert).not.toHaveBeenCalled()
+  })
+
+  it('throws when channel has no persona or videos', async () => {
+    const channelName = 'Ghost Channel'
+
+    // Simulate no transcripts found (generatePersonaSystemPrompt throws first)
+    mockDb.select.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([]),
+        }),
+      }),
+    } as never)
+
+    await expect(regeneratePersonaSystemPrompt(channelName)).rejects.toThrow()
+  })
+
+  it('throws when no existing persona row exists to update', async () => {
+    const channelName = 'New Channel'
+
+    // Transcripts exist but persona update returns empty array (no row)
+    mockDb.select.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([
+            { transcript: 'Has videos but no persona...' },
+          ]),
+        }),
+      }),
+    } as never)
+
+    mockGenerateText.mockResolvedValue('New prompt')
+
+    mockDb.update = vi.fn().mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([]),
+        }),
+      }),
+    })
+
+    await expect(regeneratePersonaSystemPrompt(channelName)).rejects.toThrow(
+      'No persona found'
+    )
   })
 })

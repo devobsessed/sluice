@@ -8,6 +8,7 @@ import { getPersonaContext, formatContextForPrompt } from '@/lib/personas/contex
 import { findBestPersonas } from '@/lib/personas/ensemble'
 import { getExtractionForVideo } from '@/lib/db/insights'
 import { generateText } from '@/lib/claude/client'
+import { buildSystemParamForMcp } from '@/lib/personas/streaming'
 
 /**
  * Register the search_rag tool with the MCP server.
@@ -144,14 +145,21 @@ async function queryPersona(
   const context = await getPersonaContext(persona.channelName, question)
   const formattedContext = formatContextForPrompt(context)
 
-  // Build system prompt
-  let systemPrompt = persona.systemPrompt
-  if (formattedContext) {
-    systemPrompt += '\n\nContext from your content:\n' + formattedContext
-    systemPrompt += '\n\nAnswer based on your content and expertise.'
-  }
+  // Build v2 system param using the shared guard helper.
+  // buildSystemParamForMcp applies the zero-retrieval guard (and weak-retrieval
+  // soft signal) but NEVER adds ask-back permission - one-shot tool calls need
+  // answers, not questions. It also emits the [persona-guard] log line so the
+  // guard is observable at run time.
+  const system = buildSystemParamForMcp(persona, context)
 
-  const prompt = systemPrompt + '\n\n' + question
+  // Serialize system + context + question into a single string for generateText
+  // (generateText is single-string, mirroring the local-serialization in streamMessages).
+  let prompt = system
+  if (formattedContext) {
+    prompt += '\n\n<context>\n' + formattedContext + '\n</context>'
+  }
+  prompt += '\n\n' + question
+
   const text = await generateText(prompt)
 
   const sources = context.slice(0, 5).map(c => ({

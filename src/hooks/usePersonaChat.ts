@@ -14,6 +14,14 @@ import {
 export type { ChatMessage, ChatEntry }
 export { isChatMessage, isThreadBoundary }
 
+export interface SourceChunk {
+  chunkId: number
+  content: string
+  videoTitle: string
+  startTime: number | null
+  youtubeId: string | null
+}
+
 export interface PersonaChatState {
   /** All entries including thread boundaries */
   entries: ChatEntry[]
@@ -25,6 +33,10 @@ export interface PersonaChatState {
 
 interface UsePersonaChatReturn {
   state: PersonaChatState
+  /** Transient sources from the latest turn's SSE stream. Null when no message sent yet
+   * or when the current turn has not yet emitted a sources event.
+   * Never persisted to localStorage — resets to null at the start of each sendMessage. */
+  liveSources: SourceChunk[] | null
   sendMessage: (question: string) => Promise<void>
   startNewThread: () => void
   clearHistory: () => void
@@ -72,6 +84,7 @@ export function usePersonaChat(personaId: number): UsePersonaChatReturn {
   )
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [liveSources, setLiveSources] = useState<SourceChunk[] | null>(null)
 
   const abortControllerRef = useRef<AbortController | null>(null)
 
@@ -81,6 +94,7 @@ export function usePersonaChat(personaId: number): UsePersonaChatReturn {
     setStorage(loadChatStorage(personaId))
     setIsStreaming(false)
     setError(null)
+    setLiveSources(null)
   }, [personaId])
 
   // Abort any in-flight request on unmount
@@ -97,6 +111,9 @@ export function usePersonaChat(personaId: number): UsePersonaChatReturn {
 
       const controller = new AbortController()
       abortControllerRef.current = controller
+
+      // Reset transient sources at the start of each message — never persisted
+      setLiveSources(null)
 
       // Capture the context window BEFORE appending the new message
       // so the new question is not included in its own history
@@ -204,6 +221,12 @@ export function usePersonaChat(personaId: number): UsePersonaChatReturn {
                     })
                   }
                 }
+              } else if (typedEvent['type'] === 'sources') {
+                // Capture transient sources for the live turn — never persisted to localStorage
+                const rawChunks = typedEvent['chunks']
+                if (Array.isArray(rawChunks)) {
+                  setLiveSources(rawChunks as SourceChunk[])
+                }
               } else if (typedEvent['type'] === 'done') {
                 // Finalize the message and persist to localStorage
                 setStorage((prev) => {
@@ -277,5 +300,5 @@ export function usePersonaChat(personaId: number): UsePersonaChatReturn {
   // Derive state from split state pieces
   const state = deriveState(storage, isStreaming, error)
 
-  return { state, sendMessage, startNewThread, clearHistory }
+  return { state, liveSources, sendMessage, startNewThread, clearHistory }
 }

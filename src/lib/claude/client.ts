@@ -115,6 +115,61 @@ export function streamText(
   return new AgentSDKStream(prompt, options?.signal)
 }
 
+export interface MessageParam {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+/**
+ * Messages-aware streaming variant.
+ *
+ * Production: calls messages.stream with native system + multi-turn messages.
+ * Local: serializes system + messages into a single prompt string and delegates
+ * to AgentSDKStream, because query({prompt}) is string-only.
+ *
+ * The existing streamText is untouched — insights and ensemble callers that
+ * pass a single string continue to use it.
+ */
+export function streamMessages(params: {
+  system: string
+  messages: MessageParam[]
+  signal?: AbortSignal
+}): TextStream {
+  const { system, messages, signal } = params
+
+  if (hasApiKey()) {
+    return getClient().messages.stream({
+      model: MODEL,
+      max_tokens: MAX_TOKENS,
+      system,
+      messages,
+    }, { signal })
+  }
+
+  // Local path: the agent SDK query() takes a single string prompt.
+  // Serialize system + messages into a readable conversation string.
+  const serialized = serializeMessagesToPrompt(system, messages)
+  return new AgentSDKStream(serialized, signal)
+}
+
+/**
+ * Serializes a system prompt + message array into a single prompt string
+ * for the local AgentSDK path, which is string-only.
+ *
+ * This is the local-dev fallback wire format only — the production model
+ * always receives native system + messages.
+ */
+function serializeMessagesToPrompt(system: string, messages: MessageParam[]): string {
+  const parts: string[] = [system]
+
+  for (const msg of messages) {
+    const label = msg.role === 'user' ? 'Human' : 'Assistant'
+    parts.push(`\n\n${label}: ${msg.content}`)
+  }
+
+  return parts.join('')
+}
+
 /**
  * Wraps agent SDK query() to match the MessageStream interface.
  *

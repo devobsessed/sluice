@@ -53,6 +53,11 @@ vi.mock('@/lib/personas/ensemble', () => ({
   findBestPersonas: vi.fn(),
 }))
 
+// Pass through streaming module unchanged so real buildSystemParamForMcp is used
+vi.mock('@/lib/personas/streaming', async (importOriginal) => {
+  return await importOriginal<typeof import('@/lib/personas/streaming')>()
+})
+
 // Import mocked functions
 import { hybridSearch } from '@/lib/search/hybrid-search'
 import { aggregateByVideo } from '@/lib/search/aggregate'
@@ -1045,5 +1050,129 @@ describe('ensemble_query', () => {
     const response = JSON.parse(result.content[0]?.text ?? '{}')
     expect(response.responses).toHaveLength(1) // Only successful persona
     expect(response.responses[0]?.persona).toBe('Creator A')
+  })
+})
+
+// ── queryPersona v2 guard tests ───────────────────────────────────────────────
+// These verify the zero-retrieval guard fires and ask-back is absent for the
+// MCP one-shot path. buildSystemParamForMcp is the shared helper from streaming.ts.
+
+describe('queryPersona zero-retrieval guard (MCP)', () => {
+  let mockServer: {
+    registerTool: Mock
+  }
+  let toolHandler: (params: { personaName: string; question: string }) => Promise<{
+    content: Array<{ type: string; text: string }>
+    isError?: boolean
+  }>
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+
+    mockServer = {
+      registerTool: vi.fn((name, config, handler) => {
+        toolHandler = handler
+      }),
+    }
+
+    vi.mocked(db).select = vi.fn().mockReturnValue({
+      from: vi.fn().mockResolvedValue([
+        {
+          id: 1,
+          name: 'Test Creator',
+          channelName: 'Test Channel',
+          systemPrompt: 'You are Test Creator. You teach programming.',
+          expertiseTopics: ['programming'],
+          expertiseEmbedding: null,
+          transcriptCount: 30,
+          createdAt: new Date(),
+        },
+      ]),
+    }) as never
+
+    registerChatWithPersona(mockServer as unknown as McpServer)
+  })
+
+  it('queryPersona applies zero-retrieval guard when context is empty', async () => {
+    vi.mocked(getPersonaContext).mockResolvedValue([])
+    vi.mocked(formatContextForPrompt).mockReturnValue('')
+    vi.mocked(generateText).mockResolvedValue('I have not covered that topic.')
+
+    await toolHandler({ personaName: 'Test Creator', question: 'What is React?' })
+
+    // The prompt passed to generateText must contain the zero-retrieval guard text
+    const prompt = vi.mocked(generateText).mock.calls[0]?.[0] as string
+    expect(prompt.toLowerCase()).toMatch(/no (content|coverage|information|transcript)/)
+    expect(prompt).toMatch(/Do NOT answer from general knowledge/i)
+  })
+
+  it('queryPersona never includes ask-back text (zero-retrieval branch)', async () => {
+    vi.mocked(getPersonaContext).mockResolvedValue([])
+    vi.mocked(formatContextForPrompt).mockReturnValue('')
+    vi.mocked(generateText).mockResolvedValue('No coverage.')
+
+    await toolHandler({ personaName: 'Test Creator', question: 'What is React?' })
+
+    const prompt = vi.mocked(generateText).mock.calls[0]?.[0] as string
+    expect(prompt).not.toMatch(/clarif/i)
+    expect(prompt).not.toMatch(/one.*question/i)
+    expect(prompt).not.toMatch(/you may ask/i)
+  })
+
+  it('queryPersona never includes ask-back text (weak-retrieval branch)', async () => {
+    const weakContext: SearchResult[] = [
+      {
+        chunkId: 1,
+        content: 'Vaguely related content.',
+        startTime: 10,
+        endTime: 20,
+        videoId: 1,
+        videoTitle: 'Some Video',
+        channel: 'Test Channel',
+        youtubeId: 'abc123',
+        thumbnail: null,
+        similarity: 0.28,
+      },
+    ]
+    vi.mocked(getPersonaContext).mockResolvedValue(weakContext)
+    vi.mocked(formatContextForPrompt).mockReturnValue('[1] Some context')
+    vi.mocked(generateText).mockResolvedValue('Limited answer.')
+
+    await toolHandler({ personaName: 'Test Creator', question: 'Tell me something obscure.' })
+
+    const prompt = vi.mocked(generateText).mock.calls[0]?.[0] as string
+    // Must NOT have ask-back, even with weak retrieval
+    expect(prompt).not.toMatch(/clarif/i)
+    expect(prompt).not.toMatch(/one.*question/i)
+    expect(prompt).not.toMatch(/you may ask/i)
+  })
+
+  it('queryPersona return shape {text, sources} unchanged', async () => {
+    const richContext: SearchResult[] = [
+      {
+        chunkId: 1,
+        content: 'TypeScript is great.',
+        startTime: 10,
+        endTime: 20,
+        videoId: 1,
+        videoTitle: 'TypeScript Basics',
+        channel: 'Test Channel',
+        youtubeId: 'abc123',
+        thumbnail: null,
+        similarity: 0.92,
+      },
+    ]
+    vi.mocked(getPersonaContext).mockResolvedValue(richContext)
+    vi.mocked(formatContextForPrompt).mockReturnValue('[1] TypeScript is great.')
+    vi.mocked(generateText).mockResolvedValue('TypeScript is a typed superset of JavaScript.')
+
+    const result = await toolHandler({ personaName: 'Test Creator', question: 'What is TypeScript?' })
+
+    const parsed = JSON.parse(result.content[0]?.text ?? '{}')
+    expect(parsed).toHaveProperty('persona')
+    expect(parsed).toHaveProperty('answer')
+    expect(parsed).toHaveProperty('sources')
+    expect(Array.isArray(parsed.sources)).toBe(true)
+    expect(parsed.answer).toBe('TypeScript is a typed superset of JavaScript.')
   })
 })

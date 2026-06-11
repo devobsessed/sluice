@@ -19,6 +19,7 @@ const mockStartNewThread = vi.fn()
 vi.mock('@/hooks/usePersonaChat', () => ({
   usePersonaChat: () => ({
     state: mockState,
+    liveSources: null,
     sendMessage: mockSendMessage,
     clearHistory: mockClearHistory,
     startNewThread: mockStartNewThread,
