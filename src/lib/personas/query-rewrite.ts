@@ -11,8 +11,15 @@ import type { HistoryItem } from '@/lib/personas/chat-storage'
 const SHORT_WORD_COUNT = 4
 
 /** Timeout for the Haiku rewrite call in milliseconds.
- *  Graceful fallback to the raw question on timeout. */
-const REWRITE_TIMEOUT_MS = 2000
+ *  Graceful fallback to the raw question on timeout.
+ *
+ *  Calibrated 2026-06-11: real Haiku latency through the gateway, measured from
+ *  six generateTextFast round-trips, was 2.4-3.7s - the original 2000ms budget
+ *  sat BELOW the observed floor, so the rewrite timed out on every follow-up
+ *  (caught by the [query-rewrite] fallback log). 5000ms covers the band with
+ *  margin; the answer stream itself takes 5-15s, so the pre-stream wait on
+ *  detected follow-ups stays proportionate. */
+const REWRITE_TIMEOUT_MS = 5000
 
 /** Deixis/pronoun markers that signal a follow-up reference.
  *  Tested case-insensitively on word boundaries. */
@@ -124,7 +131,10 @@ export async function rewriteFollowUpQuery(params: {
 
   if (!cleaned) {
     if (process.env.NODE_ENV !== 'production') {
-      console.debug('[query-rewrite] path=raw (rewrite empty/null - fallback)', { question })
+      // Distinguish the two failure shapes: null = timeout/error inside
+      // generateTextFast; empty = model returned text that cleaned to nothing.
+      const reason = rewritten === null ? 'timeout-or-error' : 'empty-after-cleanup'
+      console.debug(`[query-rewrite] path=raw (fallback: ${reason})`, { question })
     }
     return question
   }
