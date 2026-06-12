@@ -20,13 +20,20 @@ const querySchema = z.object({
 /**
  * Tunable margin for cross-persona handoff routing.
  * Another persona's score must exceed the current persona's score by at least
- * this amount before a handoff event is emitted. Start conservative; loosen
- * with real usage data if the chip is too rare.
+ * this amount before a handoff event is emitted.
  *
- * Tune: increase toward 0.25 to suppress borderline suggestions;
- *       decrease toward 0.10 to make routing more aggressive.
+ * Calibrated 2026-06-12 against real prod centroids (10 embedded personas,
+ * probe receipts in .craft/analysis/handoff-margin-probe/): genuinely
+ * out-of-domain questions produce margins 0.13-0.31 while legitimate
+ * same-domain near-ties stay below 0.07 - nothing was observed between
+ * 0.07 and 0.13. The original 0.15 bisected the out-of-domain band, making
+ * the chip a phrasing-dependent coin flip (presented as "never fires" in
+ * prod). 0.10 sits inside the empty separating band: it catches every
+ * observed out-of-domain case and suppresses every observed near-tie.
+ * Recalibrate from [persona-handoff] logs if the persona roster changes
+ * character. Fix record: handoff-margin-collapse-at-threshold.
  */
-const HANDOFF_MARGIN = 0.15
+const HANDOFF_MARGIN = 0.10
 
 /**
  * POST /api/personas/[id]/query
@@ -128,6 +135,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           personaName: topResult.persona.name,
         }
       }
+
+      // Margin observability - the 0.15->0.10 calibration had zero prod evidence
+      // to work from; this keeps the next calibration honest. Mirrors [persona-guard].
+      console.log(
+        `[persona-handoff] current=${persona.name}(${currentResult ? currentResult.score.toFixed(4) : 'unscored'})` +
+        ` top=${topResult.persona.name}(${topResult.score.toFixed(4)})` +
+        ` margin=${currentResult ? (topResult.score - currentResult.score).toFixed(4) : 'n/a'}` +
+        ` threshold=${HANDOFF_MARGIN} fired=${handoff !== undefined}`
+      )
     }
 
     // Stream response from Claude API
