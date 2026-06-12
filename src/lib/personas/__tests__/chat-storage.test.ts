@@ -6,10 +6,15 @@ import {
   getLastMessage,
   getAllPersonaChatIds,
   clearChatStorage,
+  addFactsToStorage,
+  removeFact,
+  clearFacts,
   isThreadBoundary,
   isChatMessage,
+  MAX_FACTS,
   type ChatMessage,
   type ChatStorageV2,
+  type ChatStorageV3,
   type ChatEntry,
   type ThreadBoundary,
 } from '../chat-storage'
@@ -55,82 +60,84 @@ describe('type guards', () => {
 })
 
 describe('loadChatStorage', () => {
-  it('returns empty v2 when no data exists', () => {
+  it('returns empty v3 when no data exists', () => {
     const result = loadChatStorage(1)
-    expect(result).toEqual({ version: 2, entries: [] })
+    expect(result).toEqual({ version: 3, entries: [], facts: [] })
   })
 
-  it('loads v2 data as-is', () => {
+  it('migrates v2 data to v3, preserving entries', () => {
     const v2Data: ChatStorageV2 = {
       version: 2,
       entries: [{ question: 'Q', answer: 'A', timestamp: 1000 }],
     }
     store['persona-chat:1'] = JSON.stringify(v2Data)
     const result = loadChatStorage(1)
-    expect(result.version).toBe(2)
+    expect(result.version).toBe(3)
     expect(result.entries).toHaveLength(1)
   })
 
-  it('migrates v1 bare array to v2 with thread boundary', () => {
+  it('migrates v1 bare array to v3 with thread boundary', () => {
     const v1Data = [
       { question: 'Old Q', answer: 'Old A', timestamp: 500 },
       { question: 'Old Q2', answer: 'Old A2', timestamp: 600 },
     ]
     store['persona-chat:1'] = JSON.stringify(v1Data)
     const result = loadChatStorage(1)
-    expect(result.version).toBe(2)
+    expect(result.version).toBe(3)
     // First entry should be a thread boundary
     expect(isThreadBoundary(result.entries[0]!)).toBe(true)
     // Remaining are the original messages
     expect(result.entries).toHaveLength(3) // boundary + 2 messages
   })
 
-  it('persists migrated v2 data to localStorage after v1 migration', () => {
+  it('persists migrated v3 data to localStorage after v1 migration', () => {
     const v1Data = [{ question: 'Q', answer: 'A', timestamp: 1000 }]
     store['persona-chat:1'] = JSON.stringify(v1Data)
     loadChatStorage(1)
-    // Should have been re-saved as v2
+    // Should have been re-saved as v3
     const reSaved = JSON.parse(store['persona-chat:1']!)
-    expect(reSaved.version).toBe(2)
+    expect(reSaved.version).toBe(3)
   })
 
-  it('returns empty v2 for malformed JSON', () => {
+  it('returns empty v3 for malformed JSON', () => {
     store['persona-chat:1'] = 'not-json'
-    expect(loadChatStorage(1)).toEqual({ version: 2, entries: [] })
+    expect(loadChatStorage(1)).toEqual({ version: 3, entries: [], facts: [] })
   })
 
-  it('returns empty v2 for non-array non-object data', () => {
+  it('returns empty v3 for non-array non-object data', () => {
     store['persona-chat:1'] = JSON.stringify('string')
-    expect(loadChatStorage(1)).toEqual({ version: 2, entries: [] })
+    expect(loadChatStorage(1)).toEqual({ version: 3, entries: [], facts: [] })
   })
 })
 
 describe('saveChatStorage', () => {
   it('strips streaming and error messages', () => {
-    const data: ChatStorageV2 = {
-      version: 2,
+    const data: ChatStorageV3 = {
+      version: 3,
       entries: [
         { question: 'Good', answer: 'Yes', timestamp: 1 },
         { question: 'Bad', answer: '', timestamp: 2, isStreaming: true },
         { question: 'Err', answer: '', timestamp: 3, isError: true },
       ],
+      facts: [],
     }
     saveChatStorage(1, data)
-    const saved = JSON.parse(store['persona-chat:1']!) as ChatStorageV2
+    const saved = JSON.parse(store['persona-chat:1']!) as ChatStorageV3
     expect(saved.entries).toHaveLength(1)
     expect((saved.entries[0] as ChatMessage).question).toBe('Good')
   })
 
   it('preserves thread boundaries', () => {
-    const data: ChatStorageV2 = {
-      version: 2,
+    const data: ChatStorageV3 = {
+      version: 3,
       entries: [
         { type: 'thread-boundary', timestamp: 1 },
         { question: 'Q', answer: 'A', timestamp: 2 },
       ],
+      facts: [],
     }
     saveChatStorage(1, data)
-    const saved = JSON.parse(store['persona-chat:1']!) as ChatStorageV2
+    const saved = JSON.parse(store['persona-chat:1']!) as ChatStorageV3
     expect(saved.entries).toHaveLength(2)
     expect(isThreadBoundary(saved.entries[0]!)).toBe(true)
   })
@@ -248,5 +255,203 @@ describe('clearChatStorage', () => {
     store['persona-chat:1'] = '{}'
     clearChatStorage(1)
     expect(store['persona-chat:1']).toBeUndefined()
+  })
+})
+
+// ── v3 envelope tests ─────────────────────────────────────────────────────────
+
+describe('v3 envelope - loadChatStorage migration', () => {
+  it('migrates v2 envelope to v3 adding empty facts, preserving entries', () => {
+    const v2Data: ChatStorageV2 = {
+      version: 2,
+      entries: [{ question: 'Q', answer: 'A', timestamp: 1000 }],
+    }
+    store['persona-chat:1'] = JSON.stringify(v2Data)
+    const result = loadChatStorage(1)
+    expect(result.version).toBe(3)
+    expect((result as ChatStorageV3).facts).toEqual([])
+    expect(result.entries).toHaveLength(1)
+    expect((result.entries[0] as ChatMessage).question).toBe('Q')
+  })
+
+  it('migrates v1 bare array to v3 with boundary and empty facts', () => {
+    const v1Data = [
+      { question: 'Old Q', answer: 'Old A', timestamp: 500 },
+    ]
+    store['persona-chat:1'] = JSON.stringify(v1Data)
+    const result = loadChatStorage(1) as ChatStorageV3
+    expect(result.version).toBe(3)
+    expect(result.facts).toEqual([])
+    // First entry should be a thread boundary
+    expect(isThreadBoundary(result.entries[0]!)).toBe(true)
+    // Original message preserved
+    expect(result.entries).toHaveLength(2)
+    expect((result.entries[1] as ChatMessage).question).toBe('Old Q')
+  })
+
+  it('loads v3 data as-is without migration', () => {
+    const v3Data: ChatStorageV3 = {
+      version: 3,
+      entries: [{ question: 'Q', answer: 'A', timestamp: 1000 }],
+      facts: ['knows TypeScript'],
+    }
+    store['persona-chat:1'] = JSON.stringify(v3Data)
+    const result = loadChatStorage(1) as ChatStorageV3
+    expect(result.version).toBe(3)
+    expect(result.facts).toEqual(['knows TypeScript'])
+    expect(result.entries).toHaveLength(1)
+  })
+
+  it('returns empty v3 when no data exists', () => {
+    const result = loadChatStorage(1) as ChatStorageV3
+    expect(result.version).toBe(3)
+    expect(result.facts).toEqual([])
+    expect(result.entries).toEqual([])
+  })
+})
+
+describe('v3 envelope - saveChatStorage persists facts', () => {
+  it('saveChatStorage persists facts (does not drop them)', () => {
+    const v3Data: ChatStorageV3 = {
+      version: 3,
+      entries: [],
+      facts: ['a', 'b'],
+    }
+    saveChatStorage(1, v3Data)
+    const saved = JSON.parse(store['persona-chat:1']!) as ChatStorageV3
+    expect(saved.version).toBe(3)
+    expect(saved.facts).toEqual(['a', 'b'])
+  })
+
+  it('persists facts alongside cleaned entries', () => {
+    const v3Data: ChatStorageV3 = {
+      version: 3,
+      entries: [
+        { question: 'Good', answer: 'Yes', timestamp: 1 },
+        { question: 'Streaming', answer: '', timestamp: 2, isStreaming: true },
+      ],
+      facts: ['uses Postgres'],
+    }
+    saveChatStorage(1, v3Data)
+    const saved = JSON.parse(store['persona-chat:1']!) as ChatStorageV3
+    // Streaming entry stripped, facts preserved
+    expect(saved.entries).toHaveLength(1)
+    expect(saved.facts).toEqual(['uses Postgres'])
+  })
+})
+
+describe('addFactsToStorage', () => {
+  it('adds facts to an empty storage', () => {
+    const result = addFactsToStorage(1, ['uses TypeScript', 'likes Postgres'])
+    expect(result.facts).toEqual(['uses TypeScript', 'likes Postgres'])
+  })
+
+  it('appends new facts to existing ones', () => {
+    const v3Data: ChatStorageV3 = {
+      version: 3,
+      entries: [],
+      facts: ['existing fact'],
+    }
+    store['persona-chat:1'] = JSON.stringify(v3Data)
+    const result = addFactsToStorage(1, ['new fact'])
+    expect(result.facts).toEqual(['existing fact', 'new fact'])
+  })
+
+  it('caps at MAX_FACTS (5) newest-evicts-oldest', () => {
+    // Add 4 facts first
+    const initial: ChatStorageV3 = {
+      version: 3,
+      entries: [],
+      facts: ['fact1', 'fact2', 'fact3', 'fact4'],
+    }
+    store['persona-chat:1'] = JSON.stringify(initial)
+    // Now add 3 more - only the newest 5 total should remain
+    const result = addFactsToStorage(1, ['fact5', 'fact6', 'fact7'])
+    expect(result.facts).toHaveLength(MAX_FACTS)
+    // Oldest (fact1, fact2) evicted; newest 5 kept in order
+    expect(result.facts).toEqual(['fact3', 'fact4', 'fact5', 'fact6', 'fact7'])
+  })
+
+  it('MAX_FACTS is 5', () => {
+    expect(MAX_FACTS).toBe(5)
+  })
+
+  it('persists to localStorage after adding', () => {
+    addFactsToStorage(1, ['persisted fact'])
+    const saved = JSON.parse(store['persona-chat:1']!) as ChatStorageV3
+    expect(saved.facts).toEqual(['persisted fact'])
+  })
+})
+
+describe('removeFact', () => {
+  it('removes a specific fact by value', () => {
+    const v3Data: ChatStorageV3 = {
+      version: 3,
+      entries: [],
+      facts: ['fact A', 'fact B', 'fact C'],
+    }
+    store['persona-chat:1'] = JSON.stringify(v3Data)
+    const result = removeFact(1, 'fact B')
+    expect(result.facts).toEqual(['fact A', 'fact C'])
+  })
+
+  it('persists after remove', () => {
+    const v3Data: ChatStorageV3 = {
+      version: 3,
+      entries: [],
+      facts: ['keep', 'remove me'],
+    }
+    store['persona-chat:1'] = JSON.stringify(v3Data)
+    removeFact(1, 'remove me')
+    const saved = JSON.parse(store['persona-chat:1']!) as ChatStorageV3
+    expect(saved.facts).toEqual(['keep'])
+  })
+
+  it('is a no-op when fact does not exist', () => {
+    const v3Data: ChatStorageV3 = {
+      version: 3,
+      entries: [],
+      facts: ['fact A'],
+    }
+    store['persona-chat:1'] = JSON.stringify(v3Data)
+    const result = removeFact(1, 'nonexistent')
+    expect(result.facts).toEqual(['fact A'])
+  })
+})
+
+describe('clearFacts', () => {
+  it('clears all facts', () => {
+    const v3Data: ChatStorageV3 = {
+      version: 3,
+      entries: [],
+      facts: ['fact1', 'fact2'],
+    }
+    store['persona-chat:1'] = JSON.stringify(v3Data)
+    const result = clearFacts(1)
+    expect(result.facts).toEqual([])
+  })
+
+  it('persists after clear', () => {
+    const v3Data: ChatStorageV3 = {
+      version: 3,
+      entries: [],
+      facts: ['fact1'],
+    }
+    store['persona-chat:1'] = JSON.stringify(v3Data)
+    clearFacts(1)
+    const saved = JSON.parse(store['persona-chat:1']!) as ChatStorageV3
+    expect(saved.facts).toEqual([])
+  })
+
+  it('preserves entries while clearing facts', () => {
+    const v3Data: ChatStorageV3 = {
+      version: 3,
+      entries: [{ question: 'Q', answer: 'A', timestamp: 1 }],
+      facts: ['fact1'],
+    }
+    store['persona-chat:1'] = JSON.stringify(v3Data)
+    const result = clearFacts(1)
+    expect(result.facts).toEqual([])
+    expect(result.entries).toHaveLength(1)
   })
 })

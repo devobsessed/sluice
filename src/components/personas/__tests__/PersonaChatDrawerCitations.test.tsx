@@ -36,6 +36,7 @@ const defaultProps = {
   onOpenChange: vi.fn(),
   personaId: 1,
   personaName: 'Fireship',
+  channelName: 'Fireship',
 }
 
 function renderDrawer(props = {}) {

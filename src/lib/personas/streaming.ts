@@ -54,14 +54,16 @@ function isWeakRetrieval(context: SearchResult[]): boolean {
  *
  * Includes:
  * - Persona document (always)
+ * - Persona prompt rule: never name other creators in answer text (always)
  * - Citation instruction (when context is present)
  * - Zero-retrieval guard (when context is empty)
  * - Soft weak-retrieval / ask-back signal (when retrieval is weak but nonzero)
+ * - Remembered user facts block (when facts are provided)
  *
  * Numeric threshold values are NEVER included in the emitted text.
  */
-function buildSystemParam(persona: Persona, context: SearchResult[]): string {
-  return buildSystemCore(persona, context, { includeAskBack: true })
+function buildSystemParam(persona: Persona, context: SearchResult[], facts?: string[]): string {
+  return buildSystemCore(persona, context, { includeAskBack: true, facts })
 }
 
 /**
@@ -87,9 +89,19 @@ export function buildSystemParamForMcp(persona: Persona, context: SearchResult[]
 function buildSystemCore(
   persona: Persona,
   context: SearchResult[],
-  options: { includeAskBack: boolean }
+  options: { includeAskBack: boolean; facts?: string[] }
 ): string {
   const parts: string[] = [persona.systemPrompt]
+
+  // Persona prompt rule: never name other creators in answer text.
+  // The handoff chip owns routing - in-voice naming creates two sources of truth that drift.
+  // "This is outside what I cover" is the in-voice ceiling.
+  parts.push(
+    '\n\n---\n\n' +
+    'IMPORTANT: Never name or reference other creators in your answers. ' +
+    'If a question is outside what you cover, say "this is outside what I cover" in your own voice. ' +
+    'The interface handles routing to other experts - you do not need to.'
+  )
 
   // Guard observability: log which branch fires so a silently-broken guard is diagnosable.
   // Strong retrieval logs nothing (no noise in the happy path).
@@ -101,7 +113,7 @@ function buildSystemCore(
   }
 
   if (context.length === 0) {
-    // Zero-retrieval guard: no content retrieved — persona must state plainly it has no coverage
+    // Zero-retrieval guard: no content retrieved - persona must state plainly it has no coverage
     parts.push(
       '\n\n---\n\n' +
       'IMPORTANT: No content was retrieved from your videos for this question.\n' +
@@ -128,9 +140,19 @@ function buildSystemCore(
         'not a hard gate. ' +
         'If the question is ambiguous and the context does not clearly address it, ' +
         'you may ask ONE clarifying question to better understand what the person needs. ' +
-        'Let the evidence guide whether to ask — not your character alone.'
+        'Let the evidence guide whether to ask - not your character alone.'
       )
     }
+  }
+
+  // Remembered user facts: appended to system param (never user turns) to keep it cacheable.
+  if (options.facts && options.facts.length > 0) {
+    const factLines = options.facts.map(f => `- ${f}`).join('\n')
+    parts.push(
+      '\n\n---\n\n' +
+      'What I know about you from our past conversations:\n' +
+      factLines
+    )
   }
 
   return parts.join('')
@@ -142,6 +164,8 @@ interface StreamPersonaResponseParams {
   context: SearchResult[]
   history?: HistoryItem[]
   signal?: AbortSignal
+  /** Remembered facts about the user - appended to the system param, never to user turns */
+  facts?: string[]
 }
 
 /**
@@ -157,14 +181,15 @@ interface StreamPersonaResponseParams {
 export async function streamPersonaResponse(
   params: StreamPersonaResponseParams
 ): Promise<ReadableStream<Uint8Array>> {
-  const { persona, question, context, history = [], signal } = params
+  const { persona, question, context, history = [], signal, facts } = params
 
   const limitedContext = limitContextTokens(context)
   const formattedContext = formatContextForPrompt(limitedContext)
 
   // ── System param ──────────────────────────────────────────────────────────
   // Guard observability (zero/weak-retrieval logging) happens inside buildSystemParam.
-  const system = buildSystemParam(persona, context)
+  // Facts are appended to system (not user turns) to stay cacheable.
+  const system = buildSystemParam(persona, context, facts)
 
   // ── Messages array ────────────────────────────────────────────────────────
   // History items become 1:1 alternating user/assistant pairs.

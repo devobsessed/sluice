@@ -593,6 +593,78 @@ describe('streamPersonaResponse', () => {
     await expect(reader.read()).rejects.toThrow('Stream failed')
   })
 
+  // ── Chunk 3: facts injection into system param ─────────────────────────────
+
+  it('facts are appended to the system param when provided', async () => {
+    const mockStream = createMockStream({ finalContent: 'Response' })
+    mockStreamMessages.mockReturnValue(mockStream as never)
+
+    const facts = ['exploring TypeScript patterns', 'uses Drizzle ORM']
+
+    await streamPersonaResponse({
+      persona: mockPersona,
+      question: 'What is TypeScript?',
+      context: strongContext,
+      facts,
+    })
+
+    const { system } = mockStreamMessages.mock.calls[0]![0]
+    // Facts must appear in the system param (never in user turns)
+    expect(system).toContain('exploring TypeScript patterns')
+    expect(system).toContain('uses Drizzle ORM')
+  })
+
+  it('system param without facts contains no facts block', async () => {
+    const mockStream = createMockStream({ finalContent: 'Response' })
+    mockStreamMessages.mockReturnValue(mockStream as never)
+
+    await streamPersonaResponse({
+      persona: mockPersona,
+      question: 'What is TypeScript?',
+      context: strongContext,
+    })
+
+    const { system } = mockStreamMessages.mock.calls[0]![0]
+    // No "What I know about you" style block should appear without facts
+    expect(system).not.toContain('What I know about you')
+    expect(system).not.toContain('remember about you')
+  })
+
+  it('facts are NOT injected into user turn messages', async () => {
+    const mockStream = createMockStream({ finalContent: 'Response' })
+    mockStreamMessages.mockReturnValue(mockStream as never)
+
+    const facts = ['exploring TypeScript patterns']
+
+    await streamPersonaResponse({
+      persona: mockPersona,
+      question: 'What is TypeScript?',
+      context: strongContext,
+      facts,
+    })
+
+    const { messages } = mockStreamMessages.mock.calls[0]![0]
+    for (const msg of messages) {
+      // Facts must not appear in any user message turn
+      expect(msg.content).not.toContain('exploring TypeScript patterns')
+    }
+  })
+
+  it('persona prompt rule: system contains instruction not to name other creators', async () => {
+    const mockStream = createMockStream({ finalContent: 'Response' })
+    mockStreamMessages.mockReturnValue(mockStream as never)
+
+    await streamPersonaResponse({
+      persona: mockPersona,
+      question: 'What is TypeScript?',
+      context: strongContext,
+    })
+
+    const { system } = mockStreamMessages.mock.calls[0]![0]
+    // System should instruct the persona not to name other creators
+    expect(system.toLowerCase()).toMatch(/other creator|another creator|name.*creator|creator.*name|outside what i cover/i)
+  })
+
   it('limits context to avoid exceeding token budget', async () => {
     const largeContext: SearchResult[] = Array.from({ length: 20 }, (_, i) => ({
       chunkId: i,

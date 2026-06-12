@@ -88,6 +88,7 @@ describe('API route auth coverage', () => {
 
     // Update this number when adding new routes — forces developer to
     // consciously decide on auth for the new route
-    expect(routeFiles.length).toBe(39)
+    // 40: compress-thread (requireSession) added by persona-memory-and-handoff
+    expect(routeFiles.length).toBe(40)
   })
 })
