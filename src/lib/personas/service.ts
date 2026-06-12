@@ -347,11 +347,24 @@ export async function extractExpertiseTopics(
     'three', 'people', 'person', 'thing', 'things', 'lot', 'bit', 'part',
     'case', 'kind', 'sort', 'type', 'much', 'many', 'well', 'right',
     'left', 'new', 'old', 'big', 'good', 'bad', 'able', 'sure', 'long',
+    // Spoken-transcript fillers (live rebuild surfaced "because/yeah/okay")
+    'because', 'yeah', 'okay', 'yes', 'stuff', 'something', 'everything',
+    'anything', 'someone', 'everyone', 'somebody', 'anybody', 'nobody',
+    'gonna', 'wanna', 'gotta',
+    // Function words surfaced by real-data dry run ("them" ranked #1 for a channel)
+    'them', 'than', 'too', 'down', 'called', 'different', 'better', 'worse',
+    // Contraction stems - backstop for apostrophe variants the regex splits
+    'don', 'didn', 'doesn', 'isn', 'wasn', 'weren', 'aren', 'haven',
+    'hasn', 'hadn', 'wouldn', 'couldn', 'shouldn',
   ])
 
   for (const chunk of channelChunks) {
     const words = chunk.content
       .toLowerCase()
+      // Drop negation contractions wholesale ("don't" must not shed "don")
+      .replace(/\b[a-z]+n['’]t\b/g, ' ')
+      // Strip clitic suffixes so legitimate stems survive ("creator's" -> "creator")
+      .replace(/['’](s|re|ve|ll|d|m)\b/g, '')
       .match(/\b[a-z]{3,}\b/g) ?? []
 
     for (const word of words) {

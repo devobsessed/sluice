@@ -198,6 +198,53 @@ describe('extractExpertiseTopics', () => {
     expect(topics).toContain('architecture')
   })
 
+  it('excludes contraction fragments and spoken fillers (live-rebuild fix)', async () => {
+    const channelName = 'Test Creator'
+
+    // Fixture mirrors the live Diary Of A CEO rebuild that produced
+    // ["sleep","don","because","yeah","okay"]: negation contractions shed
+    // "don"-style fragments via the apostrophe word boundary, and filler
+    // words ranked by raw frequency. Domain terms must be what survives.
+    const fillerSpam = Array(10).fill(
+      "don't doesn't isn't wasn't because yeah okay gonna wanna stuff something"
+    ).join(' ')
+    const domainContent = Array(5).fill(
+      "sleep psychology habits sleep psychology habits the creator's audience"
+    ).join(' ')
+
+    mockDb.select.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        innerJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([
+            { content: `${fillerSpam} ${domainContent}` },
+            { content: `${fillerSpam} ${domainContent}` },
+          ]),
+        }),
+      }),
+    } as never)
+
+    const topics = await extractExpertiseTopics(channelName)
+
+    // Contraction fragments must not appear
+    expect(topics).not.toContain('don')
+    expect(topics).not.toContain('doesn')
+    expect(topics).not.toContain('isn')
+    expect(topics).not.toContain('wasn')
+    // Spoken fillers must not appear
+    expect(topics).not.toContain('because')
+    expect(topics).not.toContain('yeah')
+    expect(topics).not.toContain('okay')
+    expect(topics).not.toContain('gonna')
+    expect(topics).not.toContain('wanna')
+    expect(topics).not.toContain('stuff')
+    expect(topics).not.toContain('something')
+    // Domain terms survive, and the clitic suffix is stripped ("creator's" -> "creator")
+    expect(topics).toContain('sleep')
+    expect(topics).toContain('psychology')
+    expect(topics).toContain('habits')
+    expect(topics).toContain('creator')
+  })
+
   it('keeps high-frequency domain terms', async () => {
     const channelName = 'Test Creator'
 
