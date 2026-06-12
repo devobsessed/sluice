@@ -4,6 +4,7 @@ import { db, personas } from '@/lib/db'
 import { eq } from 'drizzle-orm'
 import { getPersonaContext } from '@/lib/personas/context'
 import { streamPersonaResponse } from '@/lib/personas/streaming'
+import { rewriteFollowUpQuery } from '@/lib/personas/query-rewrite'
 import { startApiTimer } from '@/lib/api-timing'
 import { requireSession } from '@/lib/auth-guards'
 import { historySchema } from '@/lib/personas/chat-storage'
@@ -70,8 +71,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: 'Persona not found' }, { status: 404 })
     }
 
+    // Conditionally rewrite follow-up questions into standalone search queries.
+    // The rewrite is retrieval-only: searchQuery goes to getPersonaContext while
+    // the original question still drives streamPersonaResponse, history, and UI.
+    const searchQuery = await rewriteFollowUpQuery({
+      question,
+      history: history ?? [],
+      signal: request.signal,
+    })
+
     // Get relevant context from the creator's content
-    const context = await getPersonaContext(persona.channelName, question)
+    const context = await getPersonaContext(persona.channelName, searchQuery)
 
     // Stream response from Claude API
     const stream = await streamPersonaResponse({

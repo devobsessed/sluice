@@ -32,9 +32,16 @@ vi.mock('@/lib/personas/streaming', () => ({
   streamPersonaResponse: vi.fn(),
 }))
 
+vi.mock('@/lib/personas/query-rewrite', () => ({
+  rewriteFollowUpQuery: vi.fn(),
+}))
+
+import { rewriteFollowUpQuery } from '@/lib/personas/query-rewrite'
+
 const mockDb = vi.mocked(db)
 const mockGetPersonaContext = vi.mocked(getPersonaContext)
 const mockStreamPersonaResponse = vi.mocked(streamPersonaResponse)
+const mockRewriteFollowUpQuery = vi.mocked(rewriteFollowUpQuery)
 
 describe('POST /api/personas/[id]/query', () => {
   const mockPersona: Persona = {
@@ -60,6 +67,11 @@ describe('POST /api/personas/[id]/query', () => {
 
     // Default mock: return empty context
     mockGetPersonaContext.mockResolvedValue([])
+
+    // Default mock: rewrite passes question through unchanged (no-trigger / first question)
+    mockRewriteFollowUpQuery.mockImplementation(
+      async ({ question }: { question: string }) => question,
+    )
 
     // Default mock: return streaming response
     mockStreamPersonaResponse.mockResolvedValue(
@@ -142,6 +154,8 @@ describe('POST /api/personas/[id]/query', () => {
 
     await POST(request, { params: Promise.resolve({ id: '1' }) })
 
+    // rewriteFollowUpQuery returns the original question (default mock) so
+    // getPersonaContext still receives the raw question on the no-trigger path
     expect(mockGetPersonaContext).toHaveBeenCalledWith('Test Channel', 'What is TypeScript?')
   })
 
@@ -208,5 +222,69 @@ describe('POST /api/personas/[id]/query', () => {
     expect(response.status).toBe(400)
     const data = await response.json()
     expect(data.error).toBeTruthy()
+  })
+
+  // ── Chunk 3: rewrite slot wiring ──────────────────────────────────────────────
+
+  it('route passes the rewritten search query to getPersonaContext', async () => {
+    const rewrittenQuery = 'React hook performance optimization techniques'
+    mockRewriteFollowUpQuery.mockResolvedValue(rewrittenQuery)
+
+    const request = new Request('http://localhost/api/personas/1/query', {
+      method: 'POST',
+      body: JSON.stringify({
+        question: 'expand on that',
+        history: [{ question: 'What is React?', answer: 'A JS library.' }],
+      }),
+    })
+
+    await POST(request, { params: Promise.resolve({ id: '1' }) })
+
+    // getPersonaContext must receive the REWRITTEN query, not the original
+    expect(mockGetPersonaContext).toHaveBeenCalledWith('Test Channel', rewrittenQuery)
+  })
+
+  it('route passes the ORIGINAL question (not the rewritten query) to streamPersonaResponse', async () => {
+    const originalQuestion = 'expand on that'
+    const rewrittenQuery = 'React hook performance optimization techniques'
+    mockRewriteFollowUpQuery.mockResolvedValue(rewrittenQuery)
+
+    const request = new Request('http://localhost/api/personas/1/query', {
+      method: 'POST',
+      body: JSON.stringify({
+        question: originalQuestion,
+        history: [{ question: 'What is React?', answer: 'A JS library.' }],
+      }),
+    })
+
+    await POST(request, { params: Promise.resolve({ id: '1' }) })
+
+    // streamPersonaResponse must receive the ORIGINAL question - not the rewritten string
+    expect(mockStreamPersonaResponse).toHaveBeenCalledWith(
+      expect.objectContaining({ question: originalQuestion }),
+    )
+    // And the rewritten string must NOT appear as the question
+    expect(mockStreamPersonaResponse).not.toHaveBeenCalledWith(
+      expect.objectContaining({ question: rewrittenQuery }),
+    )
+  })
+
+  it('route still works when rewriteFollowUpQuery returns the original question (no-trigger / fallback path)', async () => {
+    const originalQuestion = 'What are the performance implications of React context vs Zustand?'
+    // rewriteFollowUpQuery returns the original (heuristic did not fire or fallback)
+    mockRewriteFollowUpQuery.mockResolvedValue(originalQuestion)
+
+    const request = new Request('http://localhost/api/personas/1/query', {
+      method: 'POST',
+      body: JSON.stringify({ question: originalQuestion }),
+    })
+
+    const response = await POST(request, { params: Promise.resolve({ id: '1' }) })
+
+    expect(response.status).toBe(200)
+    expect(mockGetPersonaContext).toHaveBeenCalledWith('Test Channel', originalQuestion)
+    expect(mockStreamPersonaResponse).toHaveBeenCalledWith(
+      expect.objectContaining({ question: originalQuestion }),
+    )
   })
 })

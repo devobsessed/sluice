@@ -7,6 +7,16 @@ const MODEL = process.env.AI_GATEWAY_KEY
   : 'claude-sonnet-4-20250514'
 const MAX_TOKENS = 4096
 
+// Fast (Haiku) model for cheap, latency-sensitive calls.
+// Same gateway-prefix rule as MODEL: prepend 'anthropic/' when routing through AI Gateway.
+const FAST_MODEL = process.env.AI_GATEWAY_KEY
+  ? 'anthropic/claude-haiku-4-5-20251001'
+  : 'claude-haiku-4-5-20251001'
+// Short output budget: rewritten queries and compressed summaries are brief.
+const FAST_MAX_TOKENS = 512
+// Default timeout for generateTextFast calls (milliseconds).
+const FAST_DEFAULT_TIMEOUT_MS = 2000
+
 /**
  * Dual-path Claude client.
  *
@@ -82,6 +92,118 @@ export async function generateText(prompt: string): Promise<string> {
     }
   }
   return text
+}
+
+/**
+ * Fast, non-streaming text generation using the Haiku model.
+ *
+ * General-purpose cheap call - designed as a standalone primitive with zero
+ * caller-specific coupling. Callers: query rewriting (story 3), thread
+ * compression (story 4).
+ *
+ * Enforces its own hard timeout so callers are never left hanging:
+ * - Returns the text string on success.
+ * - Returns null on timeout, caller-supplied abort, underlying error, or empty output.
+ * - Never throws.
+ *
+ * The timeout resolves null via Promise.race (the guarantee), and also fires
+ * an AbortSignal to attempt in-flight request cancellation (best-effort cleanup).
+ *
+ * Production: direct @anthropic-ai/sdk messages.create with Haiku model.
+ * Local: agent SDK query() subprocess, same as generateText local path.
+ */
+export async function generateTextFast(
+  prompt: string,
+  options?: { timeoutMs?: number; signal?: AbortSignal },
+): Promise<string | null> {
+  const timeoutMs = options?.timeoutMs ?? FAST_DEFAULT_TIMEOUT_MS
+  const callerSignal = options?.signal
+
+  // Internal abort controller - used to cancel the in-flight request on
+  // timeout or when the caller's signal fires.
+  const controller = new AbortController()
+  const { signal } = controller
+
+  // Resolve null immediately if the caller's signal is already aborted.
+  if (callerSignal?.aborted) {
+    return null
+  }
+
+  // An "abort resolves null" promise: races against the call so that aborting
+  // the internal controller (from either the timeout or the caller's signal)
+  // wins the race without waiting for the SDK call to reject.
+  const abortPromise = new Promise<null>(resolve => {
+    signal.addEventListener('abort', () => resolve(null), { once: true })
+  })
+
+  // Chain the caller's signal: if it fires, abort our internal controller so
+  // the abortPromise wins the race.
+  if (callerSignal) {
+    callerSignal.addEventListener('abort', () => controller.abort(), { once: true })
+  }
+
+  // A promise that resolves null after timeoutMs and fires the abort.
+  const timeoutPromise = new Promise<null>(resolve => {
+    const timer = setTimeout(() => {
+      controller.abort()
+      resolve(null)
+    }, timeoutMs)
+    // If the internal signal aborts before the timer fires, clear it to avoid leaking.
+    signal.addEventListener('abort', () => clearTimeout(timer), { once: true })
+  })
+
+  const callPromise = (async (): Promise<string | null> => {
+    try {
+      if (hasApiKey()) {
+        const response = await getClient().messages.create(
+          {
+            model: FAST_MODEL,
+            max_tokens: FAST_MAX_TOKENS,
+            messages: [{ role: 'user', content: prompt }],
+          },
+          { signal },
+        )
+        const textBlock = response.content.find(block => block.type === 'text')
+        const text = textBlock?.type === 'text' ? textBlock.text : ''
+        return text || null
+      }
+
+      // Local: agent SDK spawns subprocess with Claude Code session auth.
+      const { query } = await import('@anthropic-ai/claude-agent-sdk')
+      const agentController = new AbortController()
+
+      // Bridge our internal signal to the agent SDK's abort controller.
+      signal.addEventListener('abort', () => agentController.abort(), { once: true })
+
+      const response = query({
+        prompt,
+        options: {
+          model: FAST_MODEL,
+          maxTurns: 1,
+          tools: [],
+          persistSession: false,
+          abortController: agentController,
+        },
+      })
+
+      let text = ''
+      for await (const event of response) {
+        if (signal.aborted) break
+        if (event.type === 'assistant') {
+          for (const block of event.message.content) {
+            if (block.type === 'text') {
+              text = block.text
+            }
+          }
+        }
+      }
+      return text || null
+    } catch {
+      return null
+    }
+  })()
+
+  return Promise.race([callPromise, timeoutPromise, abortPromise])
 }
 
 /**
