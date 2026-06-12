@@ -403,11 +403,12 @@ export function PersonaStatus({ onActivePersonasChange }: PersonaStatusProps) {
           <DialogFooter>
             <Button
               variant="outline"
+              className="max-md:min-h-11"
               onClick={() => setRebuildConfirm(null)}
             >
               Cancel
             </Button>
-            <Button onClick={handleRebuildConfirm}>
+            <Button className="max-md:min-h-11" onClick={handleRebuildConfirm}>
               Rebuild
             </Button>
           </DialogFooter>
