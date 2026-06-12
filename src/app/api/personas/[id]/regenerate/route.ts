@@ -59,3 +59,9 @@ export async function POST(
     )
   }
 }
+
+/**
+ * Configure route segment for Vercel
+ * maxDuration allows longer-running operations (requires Pro plan)
+ */
+export const maxDuration = 300
