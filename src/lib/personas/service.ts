@@ -353,6 +353,7 @@ export async function extractExpertiseTopics(
     'gonna', 'wanna', 'gotta',
     // Function words surfaced by real-data dry run ("them" ranked #1 for a channel)
     'them', 'than', 'too', 'down', 'called', 'different', 'better', 'worse',
+    'were', 'doing', 'done', 'little', 'back', 'around', 'away', 'else',
     // Contraction stems - backstop for apostrophe variants the regex splits
     'don', 'didn', 'doesn', 'isn', 'wasn', 'weren', 'aren', 'haven',
     'hasn', 'hadn', 'wouldn', 'couldn', 'shouldn',
