@@ -19,3 +19,5 @@ await pool.query('TRUNCATE videos CASCADE')
 ```typescript
 await db.execute(sql`TRUNCATE videos CASCADE`)
 ```
+
+**ALSO:** any test file that uses `setupTestDb()` must join the sequential 'db' project in vitest.config.ts AND be excluded from the parallel 'unit' project - see the `db-tests-sequential-project` rule. Parallel workers truncating the shared test DB race each other mid-test.
