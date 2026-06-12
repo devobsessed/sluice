@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, act } from '@testing-library/react'
+import { render, screen, act, waitFor, fireEvent } from '@testing-library/react'
 import { PersonaStatus, PersonaStatusSkeleton } from '../PersonaStatus'
 import { PersonaStatusProvider } from '@/components/providers/PersonaStatusProvider'
 
@@ -842,6 +842,244 @@ describe('PersonaStatus', () => {
       const channelNameSpan = screen.getByText(`@${longChannelName}`)
       expect(channelNameSpan).toHaveClass('truncate')
       expect(channelNameSpan).toHaveAttribute('title', longChannelName)
+    })
+  })
+
+  describe('Staleness badge (Chunk 1)', () => {
+    // Helper for channels with all required fields
+    function makeActiveChannel(overrides: {
+      channelName?: string
+      transcriptCount?: number
+      personaTranscriptCount?: number | null
+      regeneratingAt?: string | null
+      personaName?: string | null
+    } = {}) {
+      return {
+        channelName: overrides.channelName ?? 'TestChannel',
+        transcriptCount: overrides.transcriptCount ?? 5,
+        personaId: 1,
+        personaCreatedAt: new Date().toISOString(),
+        personaName: overrides.personaName ?? null,
+        expertiseTopics: null,
+        lastRegeneratedAt: null,
+        regeneratingAt: overrides.regeneratingAt ?? null,
+        personaTranscriptCount: overrides.personaTranscriptCount ?? null,
+      }
+    }
+
+    it('shows staleness dot on active pill when current - atGeneration >= 3', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          channels: [makeActiveChannel({ transcriptCount: 8, personaTranscriptCount: 5 })],
+          threshold: 5,
+        }),
+      } as Response)
+
+      render(<PersonaStatus />, { wrapper: Wrapper })
+      await advanceDefer()
+
+      // Dot button should be visible (aria-label starts with "8" new videos)
+      const dotBtn = screen.getByRole('button', { name: /new videos since this persona was built/i })
+      expect(dotBtn).toBeInTheDocument()
+    })
+
+    it('hides dot when delta is below threshold (delta of 2)', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          channels: [makeActiveChannel({ transcriptCount: 7, personaTranscriptCount: 5 })],
+          threshold: 5,
+        }),
+      } as Response)
+
+      render(<PersonaStatus />, { wrapper: Wrapper })
+      await advanceDefer()
+
+      expect(screen.queryByRole('button', { name: /new videos since this persona was built/i })).not.toBeInTheDocument()
+    })
+
+    it('hides dot when personaTranscriptCount is null (no baseline)', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          channels: [makeActiveChannel({ transcriptCount: 10, personaTranscriptCount: null })],
+          threshold: 5,
+        }),
+      } as Response)
+
+      render(<PersonaStatus />, { wrapper: Wrapper })
+      await advanceDefer()
+
+      expect(screen.queryByRole('button', { name: /new videos since this persona was built/i })).not.toBeInTheDocument()
+    })
+
+    it('suppresses dot and shows Rebuilding when regeneratingAt is set (server-truth: another user)', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          channels: [makeActiveChannel({
+            transcriptCount: 8,
+            personaTranscriptCount: 5,
+            regeneratingAt: new Date().toISOString(),
+          })],
+          threshold: 5,
+        }),
+      } as Response)
+
+      render(<PersonaStatus />, { wrapper: Wrapper })
+      await advanceDefer()
+
+      // No staleness dot
+      expect(screen.queryByRole('button', { name: /new videos since this persona was built/i })).not.toBeInTheDocument()
+      // In-flight microstate visible
+      expect(screen.getByText(/rebuilding/i)).toBeInTheDocument()
+    })
+
+    it('clicking the dot opens the confirm with N and name', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          channels: [makeActiveChannel({
+            channelName: 'Fireship',
+            personaName: 'The Fireship Persona',
+            transcriptCount: 8,
+            personaTranscriptCount: 5,
+          })],
+          threshold: 5,
+        }),
+      } as Response)
+
+      render(<PersonaStatus />, { wrapper: Wrapper })
+      await advanceDefer()
+
+      const dotBtn = screen.getByRole('button', { name: /new videos since this persona was built/i })
+      await act(async () => {
+        fireEvent.click(dotBtn)
+      })
+
+      // Confirm dialog should open with benefit copy
+      expect(screen.getByText(/rebuild the fireship persona from 3 new videos/i)).toBeInTheDocument()
+    })
+
+    it('cancel closes confirm with no fetch', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          channels: [makeActiveChannel({ transcriptCount: 8, personaTranscriptCount: 5 })],
+          threshold: 5,
+        }),
+      } as Response)
+
+      render(<PersonaStatus />, { wrapper: Wrapper })
+      await advanceDefer()
+
+      const dotBtn = screen.getByRole('button', { name: /new videos since this persona was built/i })
+      await act(async () => {
+        fireEvent.click(dotBtn)
+      })
+
+      // Click Cancel
+      const cancelBtn = screen.getByRole('button', { name: /cancel/i })
+      await act(async () => {
+        fireEvent.click(cancelBtn)
+      })
+
+      // Confirm closed - no regenerate POST (fetch called only once for status)
+      expect(fetch).toHaveBeenCalledTimes(1)
+      expect(screen.queryByText(/rebuild/i)).not.toBeInTheDocument()
+    })
+
+    it('confirm POSTs to regenerate and shows Updated then clears', async () => {
+      // Track when the POST resolves so we can await the full async flow
+      let resolvePost: () => void
+      const postPromise = new Promise<void>(resolve => { resolvePost = resolve })
+
+      vi.mocked(fetch)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            channels: [makeActiveChannel({
+              channelName: 'Fireship',
+              transcriptCount: 8,
+              personaTranscriptCount: 5,
+            })],
+            threshold: 5,
+          }),
+        } as Response)
+        .mockImplementationOnce(async () => {
+          // POST /api/personas/1/regenerate - signal completion
+          resolvePost!()
+          return {
+            ok: true,
+            json: async () => ({
+              id: 1,
+              channelName: 'Fireship',
+              transcriptCount: 8,
+              lastRegeneratedAt: new Date().toISOString(),
+            }),
+          } as Response
+        })
+        .mockResolvedValueOnce({
+          // refetch() call
+          ok: true,
+          json: async () => ({
+            channels: [makeActiveChannel({ channelName: 'Fireship', transcriptCount: 8, personaTranscriptCount: 8 })],
+            threshold: 5,
+          }),
+        } as Response)
+
+      render(<PersonaStatus />, { wrapper: Wrapper })
+      await advanceDefer()
+
+      const dotBtn = screen.getByRole('button', { name: /new videos since this persona was built/i })
+      await act(async () => {
+        fireEvent.click(dotBtn)
+      })
+
+      const rebuildBtn = screen.getByRole('button', { name: /^rebuild$/i })
+      // Click the rebuild button and wait for the POST fetch + state updates to settle
+      await act(async () => {
+        fireEvent.click(rebuildBtn)
+        await postPromise
+      })
+
+      // POST to the correct URL
+      expect(fetch).toHaveBeenCalledWith('/api/personas/1/regenerate', { method: 'POST' })
+
+      // Done state renders after the POST resolves - check after an additional microtask flush
+      await act(async () => {
+        // Yield to the event loop so state updates from the async handler propagate
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(screen.getByText(/updated/i)).toBeInTheDocument()
+    })
+
+    it('existing active pill affordances (checkmark, chat button) are unchanged when stale dot shows', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          channels: [makeActiveChannel({
+            channelName: 'Fireship',
+            personaName: 'The Fireship Persona',
+            transcriptCount: 8,
+            personaTranscriptCount: 5,
+          })],
+          threshold: 5,
+        }),
+      } as Response)
+
+      render(<PersonaStatus />, { wrapper: Wrapper })
+      await advanceDefer()
+
+      // Checkmark still present
+      expect(screen.getByText('✓')).toBeInTheDocument()
+      // Chat button still present
+      expect(screen.getByTestId('chat-btn-Fireship')).toBeInTheDocument()
+      // Staleness dot also present
+      expect(screen.getByRole('button', { name: /new videos since this persona was built/i })).toBeInTheDocument()
     })
   })
 })

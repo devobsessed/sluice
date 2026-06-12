@@ -1,12 +1,22 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Loader2, MessageCircle } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Loader2, MessageCircle, RefreshCw } from 'lucide-react'
 import { usePersonaStatus } from '@/components/providers/PersonaStatusProvider'
 import type { PersonaChannel } from '@/components/providers/PersonaStatusProvider'
 
 const MAX_VISIBLE = 5
+
+/** Number of new transcripts since generation that triggers the staleness badge. */
+export const STALENESS_THRESHOLD = 3
 
 function sortChannels(channels: PersonaChannel[], threshold: number) {
   return [...channels].sort((a, b) => {
@@ -57,11 +67,38 @@ interface PersonaStatusProps {
   onActivePersonasChange?: (hasActive: boolean) => void
 }
 
+/** Confirm dialog state for the staleness rebuild flow */
+interface RebuildConfirm {
+  channelName: string
+  personaId: number
+  personaDisplayName: string
+  newCount: number
+}
+
 export function PersonaStatus({ onActivePersonasChange }: PersonaStatusProps) {
-  const { channels, threshold, isLoading, updateChannel } = usePersonaStatus()
+  const { channels, threshold, isLoading, updateChannel, refetch } = usePersonaStatus()
   const [creating, setCreating] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
+
+  // Local in-flight regenerating state: channelName -> boolean
+  // Merges with server-side regeneratingAt for the pill microstate
+  const [localRebuilding, setLocalRebuilding] = useState<Set<string>>(new Set())
+  // Brief "Updated" done state: set of channelNames showing the done state
+  const [localDone, setLocalDone] = useState<Set<string>>(new Set())
+  // Confirm dialog state - null = closed
+  const [rebuildConfirm, setRebuildConfirm] = useState<RebuildConfirm | null>(null)
+
+  // Stable ref to track active done-state timers so we can clear on unmount
+  const doneTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+
+  useEffect(() => {
+    // Capture ref value so the cleanup sees the correct map at the time the effect ran
+    const timers = doneTimers.current
+    return () => {
+      timers.forEach(t => clearTimeout(t))
+    }
+  }, [])
 
   // Notify parent about active personas whenever channels data changes
   useEffect(() => {
@@ -100,6 +137,48 @@ export function PersonaStatus({ onActivePersonasChange }: PersonaStatusProps) {
       setCreating(null)
     }
   }, [onActivePersonasChange, updateChannel])
+
+  const handleRebuildConfirm = useCallback(async () => {
+    if (!rebuildConfirm) return
+    const { channelName, personaId } = rebuildConfirm
+    setRebuildConfirm(null)
+
+    setLocalRebuilding(prev => new Set(prev).add(channelName))
+
+    try {
+      await fetch(`/api/personas/${personaId}/regenerate`, { method: 'POST' })
+
+      // Transition from in-flight to done before refetch to avoid the loading
+      // skeleton (fetchStatus sets isLoading=true) hiding the "Updated" state.
+      setLocalRebuilding(prev => {
+        const next = new Set(prev)
+        next.delete(channelName)
+        return next
+      })
+      setLocalDone(prev => new Set(prev).add(channelName))
+
+      // Fire-and-forget refetch: pull the advanced baseline from the server.
+      // Don't await - the done state needs to remain visible during the load.
+      refetch()
+
+      const timer = setTimeout(() => {
+        setLocalDone(prev => {
+          const next = new Set(prev)
+          next.delete(channelName)
+          return next
+        })
+        doneTimers.current.delete(channelName)
+      }, 2500)
+      doneTimers.current.set(channelName, timer)
+    } catch {
+      // On error just clear the in-flight state silently - persona still works
+      setLocalRebuilding(prev => {
+        const next = new Set(prev)
+        next.delete(channelName)
+        return next
+      })
+    }
+  }, [rebuildConfirm, refetch])
 
   // Loading state
   if (isLoading) {
@@ -142,13 +221,62 @@ export function PersonaStatus({ onActivePersonasChange }: PersonaStatusProps) {
           // Active persona card
           if (isActive) {
             const personaDisplayName = channel.personaName || channel.channelName
+
+            // Staleness: gap of 3+ new transcripts since generation.
+            // personaTranscriptCount is null (no persona baseline) or number.
+            // Treat undefined as null (older fixtures without the field).
+            const atGen = channel.personaTranscriptCount ?? null
+            const delta = atGen !== null ? channel.transcriptCount - atGen : 0
+            const isStale = atGen !== null && delta >= STALENESS_THRESHOLD
+
+            // In-flight: server-truth (regeneratingAt from another user) OR local POST
+            const isRebuilding =
+              Boolean(channel.regeneratingAt) ||
+              localRebuilding.has(channel.channelName)
+
+            // Brief done state after a successful local rebuild
+            const isDone = localDone.has(channel.channelName)
+
             return (
               <div
                 key={channel.channelName}
                 className="flex items-center gap-1.5 rounded-full border bg-green-500/10 px-3 py-1 text-sm text-green-700 dark:text-green-400 min-w-[160px] max-w-[280px]"
               >
                 <span className="font-medium truncate" title={channel.channelName}>@{channel.channelName}</span>
-                <span className="text-green-600 dark:text-green-400">✓</span>
+                {/* In-flight: rebuilding microstate */}
+                {isRebuilding ? (
+                  <span className="flex items-center gap-1 shrink-0 text-xs text-muted-foreground">
+                    <RefreshCw className="size-3 animate-spin" aria-hidden="true" />
+                    Rebuilding...
+                  </span>
+                ) : isDone ? (
+                  /* Brief done state */
+                  <span className="shrink-0 text-xs text-green-600 dark:text-green-400">
+                    Updated
+                  </span>
+                ) : (
+                  <>
+                    <span className="text-green-600 dark:text-green-400">✓</span>
+                    {/* Staleness badge: size-3 dot, but wrapped in a >= 44px touch target */}
+                    {isStale && (
+                      <button
+                        type="button"
+                        aria-label={`${delta} new videos since this persona was built - rebuild`}
+                        className="relative flex items-center justify-center min-h-[44px] min-w-[44px] -my-[10px] shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded"
+                        onClick={() =>
+                          setRebuildConfirm({
+                            channelName: channel.channelName,
+                            personaId: channel.personaId!,
+                            personaDisplayName,
+                            newCount: delta,
+                          })
+                        }
+                      >
+                        <span className="size-3 rounded-full bg-[#059669]" />
+                      </button>
+                    )}
+                  </>
+                )}
                 <Button
                   variant="ghost"
                   size="icon-xs"
@@ -258,6 +386,33 @@ export function PersonaStatus({ onActivePersonasChange }: PersonaStatusProps) {
       {error && (
         <p className="text-xs text-destructive">{error}</p>
       )}
+
+      {/* Rebuild confirm dialog */}
+      <Dialog
+        open={rebuildConfirm !== null}
+        onOpenChange={open => {
+          if (!open) setRebuildConfirm(null)
+        }}
+      >
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>
+              Rebuild {rebuildConfirm?.personaDisplayName} from {rebuildConfirm?.newCount} new videos?
+            </DialogTitle>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRebuildConfirm(null)}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleRebuildConfirm}>
+              Rebuild
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

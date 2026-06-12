@@ -7,6 +7,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -33,6 +34,18 @@ interface PersonaActionsMenuProps {
    * When null/undefined, the indicator is omitted (resting state - no false claim).
    */
   lastRegeneratedAt?: string | null
+  /**
+   * The persona's at-generation transcript count (personas.transcript_count).
+   * Used to render "Up to date - built from all N transcripts" when not stale.
+   * When undefined, the up-to-date line is omitted.
+   */
+  transcriptCount?: number
+  /**
+   * Whether the persona is stale (channel has 3+ new transcripts since generation).
+   * When true, the up-to-date line is hidden - the pill badge in PersonaStatus is the stale affordance.
+   * When false and transcriptCount is provided, the up-to-date line renders.
+   */
+  isStale?: boolean
 }
 
 /**
@@ -51,6 +64,8 @@ export function PersonaActionsMenu({
   onRemoveFact,
   onClearFacts,
   lastRegeneratedAt,
+  transcriptCount,
+  isStale,
 }: PersonaActionsMenuProps) {
   const [regenStatus, setRegenStatus] = useState<RegenerateStatus>('idle')
   const [isOpen, setIsOpen] = useState(false)
@@ -149,7 +164,15 @@ export function PersonaActionsMenu({
               <MoreHorizontal />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent align="end" className="min-w-[220px] max-w-[280px]">
+            {!isStale && typeof transcriptCount === 'number' && (
+              <>
+                <DropdownMenuLabel className="text-xs font-normal text-muted-foreground py-1.5 break-words whitespace-normal">
+                  Up to date - built from all {transcriptCount} transcripts
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+              </>
+            )}
             <DropdownMenuItem
               onSelect={handleRegenerate}
               disabled={regenStatus === 'loading'}

@@ -215,4 +215,83 @@ describe('PersonaActionsMenu', () => {
     )
     expect(screen.queryByText(/last updated/i)).not.toBeInTheDocument()
   })
+
+  it('shows "Up to date - built from all N transcripts" when not stale', async () => {
+    const user = userEvent.setup()
+    render(
+      <PersonaActionsMenu
+        personaId={1}
+        personaName="Fireship"
+        transcriptCount={12}
+        isStale={false}
+      />
+    )
+    // Open the dropdown to see the menu item
+    const trigger = screen.getByRole('button', { name: /persona actions/i })
+    await user.click(trigger)
+    expect(screen.getByText(/Up to date - built from all 12 transcripts/i)).toBeInTheDocument()
+  })
+
+  it('does not show up-to-date line when stale', async () => {
+    const user = userEvent.setup()
+    render(
+      <PersonaActionsMenu
+        personaId={1}
+        personaName="Fireship"
+        transcriptCount={12}
+        isStale={true}
+      />
+    )
+    const trigger = screen.getByRole('button', { name: /persona actions/i })
+    await user.click(trigger)
+    expect(screen.queryByText(/Up to date/i)).not.toBeInTheDocument()
+  })
+
+  it('does not show up-to-date line when transcriptCount is not provided', async () => {
+    const user = userEvent.setup()
+    render(
+      <PersonaActionsMenu
+        personaId={1}
+        personaName="Fireship"
+        isStale={false}
+      />
+    )
+    const trigger = screen.getByRole('button', { name: /persona actions/i })
+    await user.click(trigger)
+    expect(screen.queryByText(/Up to date/i)).not.toBeInTheDocument()
+  })
+
+  it('force-regenerate item is present and enabled regardless of staleness - not stale', async () => {
+    const user = userEvent.setup()
+    render(
+      <PersonaActionsMenu
+        personaId={1}
+        personaName="Fireship"
+        transcriptCount={12}
+        isStale={false}
+      />
+    )
+    const trigger = screen.getByRole('button', { name: /persona actions/i })
+    await user.click(trigger)
+    const regenItem = screen.getByRole('menuitem', { name: /regenerate persona/i })
+    expect(regenItem).toBeInTheDocument()
+    expect(regenItem).not.toBeDisabled()
+  })
+
+  it('force-regenerate item is present and enabled regardless of staleness - stale', async () => {
+    const user = userEvent.setup()
+    render(
+      <PersonaActionsMenu
+        personaId={1}
+        personaName="Fireship"
+        transcriptCount={12}
+        isStale={true}
+      />
+    )
+    const trigger = screen.getByRole('button', { name: /persona actions/i })
+    await user.click(trigger)
+    const regenItem = screen.getByRole('menuitem', { name: /regenerate persona/i })
+    expect(regenItem).toBeInTheDocument()
+    expect(regenItem).not.toBeDisabled()
+  })
 })

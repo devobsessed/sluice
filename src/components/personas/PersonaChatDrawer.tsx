@@ -46,6 +46,17 @@ interface PersonaChatDrawerProps {
    * Null/undefined when the persona has never been regenerated.
    */
   lastRegeneratedAt?: string | null
+  /**
+   * The persona's at-generation transcript count.
+   * Passed through to PersonaActionsMenu for the "Up to date" line.
+   * Undefined when not available.
+   */
+  transcriptCount?: number
+  /**
+   * Whether the persona is stale (channel has 3+ new transcripts since generation).
+   * Passed through to PersonaActionsMenu to control the up-to-date line visibility.
+   */
+  isStale?: boolean
 }
 
 interface PersonaAvatarProps {
@@ -213,6 +224,8 @@ export function PersonaChatDrawer({
   onBack,
   onPersonaSwitch,
   lastRegeneratedAt,
+  transcriptCount,
+  isStale,
 }: PersonaChatDrawerProps) {
   const { state, liveSources, handoff, facts, rememberedBoundaries, sendMessage, clearHistory, startNewThread, removeFact, clearFacts } = usePersonaChat(personaId, channelName)
   const [inputValue, setInputValue] = useState('')
@@ -408,6 +421,8 @@ export function PersonaChatDrawer({
           onRemoveFact={removeFact}
           onClearFacts={clearFacts}
           lastRegeneratedAt={lastRegeneratedAt}
+          transcriptCount={transcriptCount}
+          isStale={isStale}
         />
       </SheetHeader>
 

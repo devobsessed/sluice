@@ -199,13 +199,17 @@ Write in second person ("You are..."). Be specific and concrete - use phrases an
  * Regenerates the v2 persona system prompt for an existing persona and
  * updates the row in place.
  *
- * Persists systemPrompt, expertiseTopics (using the fixed extractor), and
- * lastRegeneratedAt in a single UPDATE. Also rebuilds expertiseEmbedding when
+ * Persists systemPrompt, expertiseTopics (using the fixed extractor),
+ * lastRegeneratedAt, and transcriptCount (advanced to the current channel
+ * video count) in a single UPDATE. Also rebuilds expertiseEmbedding when
  * computeExpertiseEmbedding returns a non-null vector - omits the key entirely
  * when null so an existing embedding is never clobbered.
  *
- * Preserves `id` and `transcriptCount` so localStorage chat history (keyed by
- * personaId) remains valid and the badge baseline is not disturbed here.
+ * Advancing transcriptCount clears the staleness badge: the at-generation
+ * snapshot becomes the current count so the delta returns to zero.
+ *
+ * Preserves `id` so localStorage chat history (keyed by personaId) remains
+ * valid.
  *
  * @param channelName - Name of the channel whose persona to update
  * @param db - Database instance (defaults to singleton)
@@ -229,6 +233,17 @@ export async function regeneratePersonaSystemPrompt(
     throw new Error(`No persona found for channel "${channelName}"`)
   }
 
+  // Count current channel videos so the baseline advances to the real count
+  // after rebuild (mirrors createPersona's pattern - select video ids by channel,
+  // take .length). This clears the staleness badge: transcript_count becomes
+  // the current count and the gap returns to zero.
+  const currentVideoRecords = await db
+    .select({ id: videos.id })
+    .from(videos)
+    .where(eq(videos.channel, channelName))
+
+  const currentTranscriptCount = currentVideoRecords.length
+
   // Regenerate all three content fields in parallel where possible.
   // generatePersonaSystemPrompt and extractExpertiseTopics both hit the DB but
   // are independent - run concurrently to keep the Claude round-trip on the
@@ -241,16 +256,19 @@ export async function regeneratePersonaSystemPrompt(
 
   // Build the SET payload. expertiseEmbedding is null-guarded: omit the key
   // entirely when the centroid cannot be computed so an existing (non-null)
-  // embedding is never overwritten with NULL.
+  // embedding is never overwritten with NULL. transcriptCount advances to the
+  // current channel count so the staleness badge clears after a rebuild.
   const setPayload: {
     systemPrompt: string
     expertiseTopics: string[]
     lastRegeneratedAt: Date
+    transcriptCount: number
     expertiseEmbedding?: number[]
   } = {
     systemPrompt,
     expertiseTopics,
     lastRegeneratedAt: new Date(),
+    transcriptCount: currentTranscriptCount,
   }
 
   if (expertiseEmbedding !== null) {

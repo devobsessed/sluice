@@ -246,6 +246,7 @@ describe('Home Page - Ensemble Trigger', () => {
         {
           channelName: 'Test Channel',
           transcriptCount: 50,
+          personaTranscriptCount: 50,
           personaId: 1,
           personaCreatedAt: new Date().toISOString(),
           personaName: 'Test',

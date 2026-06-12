@@ -552,7 +552,14 @@ describe('regeneratePersonaSystemPrompt', () => {
       }),
     } as never)
 
-    // 2nd select: transcript samples for generatePersonaSystemPrompt
+    // 2nd select: video count for channel (baseline-clear)
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([{ id: 1 }, { id: 2 }, { id: 3 }]),
+      }),
+    } as never)
+
+    // 3rd select: transcript samples for generatePersonaSystemPrompt
     mockDb.select.mockReturnValueOnce({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({
@@ -563,7 +570,7 @@ describe('regeneratePersonaSystemPrompt', () => {
       }),
     } as never)
 
-    // 3rd select: chunk content for extractExpertiseTopics (innerJoin path)
+    // 4th select: chunk content for extractExpertiseTopics (innerJoin path)
     mockDb.select.mockReturnValueOnce({
       from: vi.fn().mockReturnValue({
         innerJoin: vi.fn().mockReturnValue({
@@ -665,7 +672,14 @@ describe('regeneratePersonaSystemPrompt', () => {
       }),
     } as never)
 
-    // 2nd select: transcripts for generatePersonaSystemPrompt
+    // 2nd select: video count for channel (baseline-clear)
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }, { id: 6 }, { id: 7 }]),
+      }),
+    } as never)
+
+    // 3rd select: transcripts for generatePersonaSystemPrompt
     mockDb.select.mockReturnValueOnce({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({
@@ -674,7 +688,7 @@ describe('regeneratePersonaSystemPrompt', () => {
       }),
     } as never)
 
-    // 3rd select: chunks for extractExpertiseTopics
+    // 4th select: chunks for extractExpertiseTopics
     const domainContent = Array(5).fill('deployment kubernetes deployment kubernetes').join(' ')
     mockDb.select.mockReturnValueOnce({
       from: vi.fn().mockReturnValue({
@@ -739,7 +753,14 @@ describe('regeneratePersonaSystemPrompt', () => {
       }),
     } as never)
 
-    // 2nd select: transcripts
+    // 2nd select: video count for channel (baseline-clear)
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([{ id: 1 }, { id: 2 }]),
+      }),
+    } as never)
+
+    // 3rd select: transcripts
     mockDb.select.mockReturnValueOnce({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({
@@ -748,7 +769,7 @@ describe('regeneratePersonaSystemPrompt', () => {
       }),
     } as never)
 
-    // 3rd select: chunks for topics
+    // 4th select: chunks for topics
     mockDb.select.mockReturnValueOnce({
       from: vi.fn().mockReturnValue({
         innerJoin: vi.fn().mockReturnValue({
@@ -788,7 +809,7 @@ describe('regeneratePersonaSystemPrompt', () => {
     expect(capturedSetPayload).toHaveProperty('lastRegeneratedAt')
   })
 
-  it('does not touch id or transcriptCount in the update payload', async () => {
+  it('does not touch id in the update payload (transcriptCount IS advanced - narrowed from predecessor)', async () => {
     const channelName = 'Test Creator'
     const existingPersona = {
       id: 99,
@@ -812,7 +833,14 @@ describe('regeneratePersonaSystemPrompt', () => {
       }),
     } as never)
 
-    // 2nd select: transcripts
+    // 2nd select: video count for channel (new - baseline-clear)
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([{ id: 1 }, { id: 2 }]),
+      }),
+    } as never)
+
+    // 3rd select: transcripts
     mockDb.select.mockReturnValueOnce({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({
@@ -821,7 +849,7 @@ describe('regeneratePersonaSystemPrompt', () => {
       }),
     } as never)
 
-    // 3rd select: chunks for topics
+    // 4th select: chunks for topics
     mockDb.select.mockReturnValueOnce({
       from: vi.fn().mockReturnValue({
         innerJoin: vi.fn().mockReturnValue({
@@ -852,8 +880,97 @@ describe('regeneratePersonaSystemPrompt', () => {
 
     await regeneratePersonaSystemPrompt(channelName)
 
-    // id and transcriptCount must NOT be in the SET payload
+    // id must NOT be in the SET payload (localStorage history keyed by personaId)
     expect(Object.prototype.hasOwnProperty.call(capturedSetPayload, 'id')).toBe(false)
-    expect(Object.prototype.hasOwnProperty.call(capturedSetPayload, 'transcriptCount')).toBe(false)
+    // transcriptCount IS now in the SET payload (baseline-clear, narrowed from predecessor)
+    expect(Object.prototype.hasOwnProperty.call(capturedSetPayload, 'transcriptCount')).toBe(true)
+  })
+
+  it('regenerate advances transcript_count to the current channel video count', async () => {
+    const channelName = 'Test Creator'
+    const existingPersona = {
+      id: 7,
+      channelName,
+      name: channelName,
+      systemPrompt: 'Old prompt',
+      expertiseTopics: ['old'],
+      expertiseEmbedding: new Array(384).fill(0.1),
+      transcriptCount: 5,
+      regeneratingAt: null,
+      lastRegeneratedAt: null,
+      createdAt: new Date(),
+    }
+
+    const updatedPersonaWith8 = {
+      ...existingPersona,
+      transcriptCount: 8,
+      systemPrompt: 'New system prompt',
+      lastRegeneratedAt: new Date(),
+    }
+
+    // 1st select: existing persona row
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([existingPersona]),
+        }),
+      }),
+    } as never)
+
+    // 2nd select: video count for channel - returns 8 video rows
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([
+          { id: 1 }, { id: 2 }, { id: 3 }, { id: 4 },
+          { id: 5 }, { id: 6 }, { id: 7 }, { id: 8 },
+        ]),
+      }),
+    } as never)
+
+    // 3rd select: transcript samples for generatePersonaSystemPrompt
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([{ transcript: 'Sample transcript' }]),
+        }),
+      }),
+    } as never)
+
+    // 4th select: chunks for extractExpertiseTopics
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        innerJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([
+            { content: 'deployment deployment kubernetes kubernetes' },
+            { content: 'deployment kubernetes' },
+          ]),
+        }),
+      }),
+    } as never)
+
+    mockGenerateText.mockResolvedValue('New system prompt')
+
+    const { computeChannelCentroid } = await import('@/lib/channels/similarity')
+    vi.mocked(computeChannelCentroid).mockResolvedValue(new Array(384).fill(0.5))
+
+    let capturedSetPayload: Record<string, unknown> = {}
+    mockDb.update = vi.fn().mockReturnValue({
+      set: vi.fn().mockImplementation((payload: Record<string, unknown>) => {
+        capturedSetPayload = payload
+        return {
+          where: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([updatedPersonaWith8]),
+          }),
+        }
+      }),
+    })
+
+    const result = await regeneratePersonaSystemPrompt(channelName)
+
+    // transcript_count must advance to the current channel count (8), not stay at 5
+    expect(capturedSetPayload['transcriptCount']).toBe(8)
+    expect(result.transcriptCount).toBe(8)
+    // id must NOT be touched
+    expect(Object.prototype.hasOwnProperty.call(capturedSetPayload, 'id')).toBe(false)
   })
 })

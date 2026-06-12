@@ -5,6 +5,10 @@ import { createContext, useContext, useEffect, useState, useCallback } from 'rea
 export interface PersonaChannel {
   channelName: string
   transcriptCount: number
+  /** Count of videos at the time the persona was last built (at-generation snapshot).
+   *  NULL when no persona exists for this channel.
+   *  Distinct from `transcriptCount` (live channel count) - used to derive staleness delta. */
+  personaTranscriptCount: number | null
   personaId: number | null
   personaCreatedAt: string | null
   personaName: string | null
