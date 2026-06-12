@@ -9,6 +9,10 @@ export interface PersonaChannel {
   personaCreatedAt: string | null
   personaName: string | null
   expertiseTopics: string[] | null
+  /** ISO timestamp of the last completed regeneration; null when persona has never been regenerated */
+  lastRegeneratedAt: string | null
+  /** ISO timestamp of an in-flight regeneration lock; null when idle */
+  regeneratingAt: string | null
 }
 
 interface PersonaStatusContextValue {

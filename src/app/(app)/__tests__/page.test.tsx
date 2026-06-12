@@ -250,6 +250,8 @@ describe('Home Page - Ensemble Trigger', () => {
           personaCreatedAt: new Date().toISOString(),
           personaName: 'Test',
           expertiseTopics: null,
+          lastRegeneratedAt: null,
+          regeneratingAt: null,
         },
       ],
       threshold: 30,

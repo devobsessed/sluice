@@ -129,6 +129,10 @@ export function ChatHubDrawer() {
               personaName={activePersona.name}
               channelName={activePersona.channelName}
               expertiseTopics={activePersona.expertiseTopics}
+              lastRegeneratedAt={
+                channels.find((c) => c.channelName === activePersona.channelName)
+                  ?.lastRegeneratedAt ?? null
+              }
               embedded
               onBack={handleBackToHub}
               onPersonaSwitch={(targetId) => {

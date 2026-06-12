@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { POST } from '../route'
 import { db } from '@/lib/db'
-import { regeneratePersonaSystemPrompt } from '@/lib/personas/service'
+import {
+  regeneratePersonaSystemPrompt,
+  claimRegenerationLock,
+  releaseRegenerationLock,
+  waitForRegenerationToClear,
+} from '@/lib/personas/service'
 
 vi.mock('@/lib/auth-guards', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/auth-guards')>()
@@ -23,10 +28,16 @@ vi.mock('@/lib/db', async () => {
 
 vi.mock('@/lib/personas/service', () => ({
   regeneratePersonaSystemPrompt: vi.fn(),
+  claimRegenerationLock: vi.fn(),
+  releaseRegenerationLock: vi.fn(),
+  waitForRegenerationToClear: vi.fn(),
 }))
 
 const mockDb = vi.mocked(db)
 const mockRegenerate = vi.mocked(regeneratePersonaSystemPrompt)
+const mockClaim = vi.mocked(claimRegenerationLock)
+const mockRelease = vi.mocked(releaseRegenerationLock)
+const mockWait = vi.mocked(waitForRegenerationToClear)
 
 const mockPersona = {
   id: 1,
@@ -36,6 +47,8 @@ const mockPersona = {
   expertiseTopics: ['programming'],
   expertiseEmbedding: null,
   transcriptCount: 30,
+  regeneratingAt: null,
+  lastRegeneratedAt: null,
   createdAt: new Date(),
 }
 
@@ -54,7 +67,11 @@ describe('POST /api/personas/[id]/regenerate', () => {
       limit: vi.fn().mockResolvedValue([mockPersona]),
     })
 
+    // Default: lock claim succeeds (owner path)
+    mockClaim.mockResolvedValue(true)
+    mockRelease.mockResolvedValue(undefined)
     mockRegenerate.mockResolvedValue(updatedPersona)
+    mockWait.mockResolvedValue(updatedPersona)
   })
 
   afterEach(() => {
@@ -144,5 +161,77 @@ describe('POST /api/personas/[id]/regenerate', () => {
     expect(response.status).toBe(500)
     const data = await response.json()
     expect(data.error).toBeTruthy()
+  })
+
+  // --- Chunk 3: lock orchestration + richer response ---
+
+  it('response includes transcriptCount and lastRegeneratedAt on success', async () => {
+    const lastRegen = new Date('2026-06-12T10:00:00Z')
+    const richUpdated = {
+      ...updatedPersona,
+      transcriptCount: 30,
+      lastRegeneratedAt: lastRegen,
+    }
+    mockRegenerate.mockResolvedValueOnce(richUpdated)
+
+    const request = new Request('http://localhost/api/personas/1/regenerate', {
+      method: 'POST',
+    })
+    const response = await POST(request, { params: Promise.resolve({ id: '1' }) })
+
+    expect(response.status).toBe(200)
+    const data = await response.json()
+    expect(data.transcriptCount).toBe(30)
+    expect(data.lastRegeneratedAt).toBeTruthy()
+  })
+
+  it('concurrent POST joins instead of regenerating: joiner gets waitForRegenerationToClear result', async () => {
+    // Loser of claim: waitForRegenerationToClear is called, regenerate is NOT called
+    mockClaim.mockResolvedValueOnce(false)
+    const freshPersona = {
+      ...updatedPersona,
+      systemPrompt: 'Winner freshly regenerated prompt',
+      lastRegeneratedAt: new Date(),
+    }
+    mockWait.mockResolvedValueOnce(freshPersona)
+
+    const request = new Request('http://localhost/api/personas/1/regenerate', {
+      method: 'POST',
+    })
+    const response = await POST(request, { params: Promise.resolve({ id: '1' }) })
+
+    expect(response.status).toBe(200)
+    const data = await response.json()
+    expect(data.systemPrompt).toBe('Winner freshly regenerated prompt')
+    // Regenerate must NOT have been called on the joiner path
+    expect(mockRegenerate).not.toHaveBeenCalled()
+    expect(mockWait).toHaveBeenCalledWith(mockPersona.id, expect.any(Number))
+  })
+
+  it('Claude failure releases the lock then returns 500', async () => {
+    mockClaim.mockResolvedValueOnce(true)
+    mockRegenerate.mockRejectedValueOnce(new Error('Claude API down'))
+
+    const request = new Request('http://localhost/api/personas/1/regenerate', {
+      method: 'POST',
+    })
+    const response = await POST(request, { params: Promise.resolve({ id: '1' }) })
+
+    expect(response.status).toBe(500)
+    // Lock must have been released even though regenerate threw
+    expect(mockRelease).toHaveBeenCalledWith(mockPersona.id)
+  })
+
+  it('owner path calls claimRegenerationLock then regenerate then release', async () => {
+    mockClaim.mockResolvedValueOnce(true)
+
+    const request = new Request('http://localhost/api/personas/1/regenerate', {
+      method: 'POST',
+    })
+    await POST(request, { params: Promise.resolve({ id: '1' }) })
+
+    expect(mockClaim).toHaveBeenCalledWith(mockPersona.id, 300_000)
+    expect(mockRegenerate).toHaveBeenCalledWith('Test Channel')
+    expect(mockRelease).toHaveBeenCalledWith(mockPersona.id)
   })
 })

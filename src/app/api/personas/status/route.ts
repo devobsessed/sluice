@@ -29,6 +29,8 @@ export async function GET() {
           createdAt: personas.createdAt,
           name: personas.name,
           expertiseTopics: personas.expertiseTopics,
+          lastRegeneratedAt: personas.lastRegeneratedAt,
+          regeneratingAt: personas.regeneratingAt,
         })
         .from(personas),
     ])
@@ -47,6 +49,8 @@ export async function GET() {
         personaCreatedAt: persona?.createdAt ?? null,
         personaName: persona?.name ?? null,
         expertiseTopics: persona?.expertiseTopics ?? null,
+        lastRegeneratedAt: persona?.lastRegeneratedAt ?? null,
+        regeneratingAt: persona?.regeneratingAt ?? null,
       }
     })
 

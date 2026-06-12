@@ -55,6 +55,8 @@ describe('streamPersonaResponse', () => {
     expertiseTopics: ['programming', 'typescript'],
     expertiseEmbedding: null,
     transcriptCount: 30,
+    regeneratingAt: null,
+    lastRegeneratedAt: null,
     createdAt: new Date(),
   }
 

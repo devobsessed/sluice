@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+import { formatRelativeTime } from '@/lib/time-utils'
 
 type RegenerateStatus = 'idle' | 'loading' | 'success' | 'error'
 
@@ -26,6 +27,12 @@ interface PersonaActionsMenuProps {
   onRemoveFact?: (fact: string) => void
   /** Called to clear all facts for this persona. */
   onClearFacts?: () => void
+  /**
+   * ISO timestamp of the last completed regeneration.
+   * When provided, renders a "last updated X ago" indicator.
+   * When null/undefined, the indicator is omitted (resting state - no false claim).
+   */
+  lastRegeneratedAt?: string | null
 }
 
 /**
@@ -43,15 +50,18 @@ export function PersonaActionsMenu({
   facts = [],
   onRemoveFact,
   onClearFacts,
+  lastRegeneratedAt,
 }: PersonaActionsMenuProps) {
-  const [status, setStatus] = useState<RegenerateStatus>('idle')
+  const [regenStatus, setRegenStatus] = useState<RegenerateStatus>('idle')
   const [isOpen, setIsOpen] = useState(false)
   const [showFacts, setShowFacts] = useState(false)
+  /** transcriptCount from the last successful regenerate response */
+  const [successCount, setSuccessCount] = useState<number | null>(null)
 
   async function handleRegenerate() {
-    if (status === 'loading') return
+    if (regenStatus === 'loading') return
 
-    setStatus('loading')
+    setRegenStatus('loading')
     // Close the menu so the loading indicator is visible in context
     setIsOpen(false)
 
@@ -62,20 +72,22 @@ export function PersonaActionsMenu({
       })
 
       if (!response.ok) {
-        setStatus('error')
+        setRegenStatus('error')
         // Clear error state after a delay so the user can re-try
-        setTimeout(() => setStatus('idle'), 4000)
+        setTimeout(() => setRegenStatus('idle'), 4000)
         return
       }
 
-      setStatus('success')
+      const data = await response.json() as { transcriptCount?: number; lastRegeneratedAt?: string | null }
+      setSuccessCount(data.transcriptCount ?? null)
+      setRegenStatus('success')
       onRegenSuccess?.()
 
       // Reset to idle after success indicator
-      setTimeout(() => setStatus('idle'), 2500)
+      setTimeout(() => setRegenStatus('idle'), 2500)
     } catch {
-      setStatus('error')
-      setTimeout(() => setStatus('idle'), 4000)
+      setRegenStatus('error')
+      setTimeout(() => setRegenStatus('idle'), 4000)
     }
   }
 
@@ -83,33 +95,45 @@ export function PersonaActionsMenu({
     setShowFacts(true)
   }
 
+  // "last updated X ago" derived from the prop (never from response - that's the new timestamp,
+  // but the prop reflects what was known when the drawer opened; the sibling populates it from
+  // the status provider)
+  const lastUpdatedLabel = lastRegeneratedAt
+    ? `last updated ${formatRelativeTime(new Date(lastRegeneratedAt))}`
+    : null
+
   return (
     <div className={cn('flex flex-col gap-1', className)}>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 min-w-0">
         {/* Feedback badge - visible when action is in flight or has a result */}
-        {status === 'loading' && (
+        {regenStatus === 'loading' && (
           <span
             aria-live="polite"
-            className="text-xs text-muted-foreground flex items-center gap-1"
+            className="text-xs text-muted-foreground flex items-center gap-1 shrink-0"
           >
             <RefreshCw className="size-3 animate-spin" aria-hidden="true" />
             Regenerating...
           </span>
         )}
-        {status === 'success' && (
+        {regenStatus === 'success' && (
           <span
             aria-live="polite"
-            className="text-xs text-primary"
+            className="text-xs text-primary truncate"
           >
-            Persona updated
+            Voice updated from {successCount ?? '?'} videos
           </span>
         )}
-        {status === 'error' && (
+        {regenStatus === 'error' && (
           <span
             aria-live="polite"
-            className="text-xs text-destructive"
+            className="text-xs text-destructive shrink-0"
           >
             Regeneration failed
+          </span>
+        )}
+        {regenStatus === 'idle' && lastUpdatedLabel && (
+          <span className="text-xs text-muted-foreground truncate">
+            {lastUpdatedLabel}
           </span>
         )}
 
@@ -119,8 +143,8 @@ export function PersonaActionsMenu({
               variant="ghost"
               size="icon-xs"
               aria-label={`Persona actions for ${personaName}`}
-              className="shrink-0 text-muted-foreground hover:text-foreground"
-              disabled={status === 'loading'}
+              className="shrink-0 text-muted-foreground hover:text-foreground ml-auto"
+              disabled={regenStatus === 'loading'}
             >
               <MoreHorizontal />
             </Button>
@@ -128,7 +152,7 @@ export function PersonaActionsMenu({
           <DropdownMenuContent align="end">
             <DropdownMenuItem
               onSelect={handleRegenerate}
-              disabled={status === 'loading'}
+              disabled={regenStatus === 'loading'}
             >
               <RefreshCw className="size-4" />
               Regenerate persona

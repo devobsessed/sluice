@@ -8,11 +8,21 @@ type ChannelStatus = {
   personaCreatedAt: string | null
   personaName: string | null
   expertiseTopics: unknown
+  lastRegeneratedAt: string | null
+  regeneratingAt: string | null
 }
 
 // Mock db query results
 let mockChannelCountResults: { channelName: string | null; transcriptCount: number }[] = []
-let mockPersonaResults: { id: number; channelName: string; createdAt: Date | null; name: string; expertiseTopics: unknown }[] = []
+let mockPersonaResults: {
+  id: number
+  channelName: string
+  createdAt: Date | null
+  name: string
+  expertiseTopics: unknown
+  lastRegeneratedAt: Date | null
+  regeneratingAt: Date | null
+}[] = []
 let mockShouldThrow = false
 let selectCallIndex = 0
 
@@ -115,7 +125,7 @@ describe('GET /api/personas/status', () => {
       { channelName: 'Anthropic', transcriptCount: 1 },
     ]
     mockPersonaResults = [
-      { id: 1, channelName: 'Nate B Jones', createdAt: personaCreatedAt, name: 'Nate', expertiseTopics: null },
+      { id: 1, channelName: 'Nate B Jones', createdAt: personaCreatedAt, name: 'Nate', expertiseTopics: null, lastRegeneratedAt: null, regeneratingAt: null },
     ]
 
     const response = await GET()
@@ -147,7 +157,7 @@ describe('GET /api/personas/status', () => {
       { channelName: 'Channel C', transcriptCount: 3 },
     ]
     mockPersonaResults = [
-      { id: 1, channelName: 'Channel A', createdAt: new Date(), name: 'Persona A', expertiseTopics: null },
+      { id: 1, channelName: 'Channel A', createdAt: new Date(), name: 'Persona A', expertiseTopics: null, lastRegeneratedAt: null, regeneratingAt: null },
     ]
 
     const response = await GET()
@@ -198,5 +208,72 @@ describe('GET /api/personas/status', () => {
 
     expect(response.status).toBe(500)
     expect(data.error).toBe('Failed to fetch persona status')
+  })
+
+  it('status response includes lastRegeneratedAt and regeneratingAt per channel - null when no persona', async () => {
+    mockChannelCountResults = [
+      { channelName: 'Solo Channel', transcriptCount: 2 },
+    ]
+    // no personas
+
+    const response = await GET()
+    const data = await response.json()
+
+    expect(response.status).toBe(200)
+    const channel = data.channels[0] as ChannelStatus
+    expect(channel).toHaveProperty('lastRegeneratedAt', null)
+    expect(channel).toHaveProperty('regeneratingAt', null)
+  })
+
+  it('status response includes lastRegeneratedAt and regeneratingAt when persona has timestamps', async () => {
+    const lastRegenAt = new Date('2026-06-10T12:00:00Z')
+    const regenAt = new Date('2026-06-12T09:00:00Z')
+    mockChannelCountResults = [
+      { channelName: 'Active Channel', transcriptCount: 8 },
+    ]
+    mockPersonaResults = [
+      {
+        id: 2,
+        channelName: 'Active Channel',
+        createdAt: new Date('2026-05-01T00:00:00Z'),
+        name: 'Active Persona',
+        expertiseTopics: null,
+        lastRegeneratedAt: lastRegenAt,
+        regeneratingAt: regenAt,
+      },
+    ]
+
+    const response = await GET()
+    const data = await response.json()
+
+    expect(response.status).toBe(200)
+    const channel = data.channels[0] as ChannelStatus
+    expect(channel.lastRegeneratedAt).toBe(lastRegenAt.toISOString())
+    expect(channel.regeneratingAt).toBe(regenAt.toISOString())
+  })
+
+  it('status response includes lastRegeneratedAt null when persona has not been regenerated', async () => {
+    mockChannelCountResults = [
+      { channelName: 'Fresh Channel', transcriptCount: 5 },
+    ]
+    mockPersonaResults = [
+      {
+        id: 3,
+        channelName: 'Fresh Channel',
+        createdAt: new Date('2026-06-01T00:00:00Z'),
+        name: 'Fresh Persona',
+        expertiseTopics: null,
+        lastRegeneratedAt: null,
+        regeneratingAt: null,
+      },
+    ]
+
+    const response = await GET()
+    const data = await response.json()
+
+    expect(response.status).toBe(200)
+    const channel = data.channels[0] as ChannelStatus
+    expect(channel.lastRegeneratedAt).toBeNull()
+    expect(channel.regeneratingAt).toBeNull()
   })
 })

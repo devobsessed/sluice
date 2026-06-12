@@ -152,6 +152,100 @@ describe('extractExpertiseTopics', () => {
 
     expect(topics).toEqual([])
   })
+
+  it('excludes walk-003 stopwords (your/what/now) from extracted topics', async () => {
+    const channelName = 'Test Creator'
+
+    // Fixture: repeat stopwords many times alongside real domain terms
+    // "your" "what" "now" appear frequently but must be filtered out
+    // "typescript" "refactoring" "architecture" appear frequently - must survive
+    const stopwordSpam = Array(10).fill(
+      'your what now just like really going want know think people thing'
+    ).join(' ')
+    const domainContent = Array(5).fill(
+      'typescript refactoring architecture typescript refactoring architecture'
+    ).join(' ')
+
+    mockDb.select.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        innerJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([
+            { content: `${stopwordSpam} ${domainContent}` },
+            { content: `${stopwordSpam} ${domainContent}` },
+            { content: `${stopwordSpam} ${domainContent}` },
+          ]),
+        }),
+      }),
+    } as never)
+
+    const topics = await extractExpertiseTopics(channelName)
+
+    expect(topics).not.toContain('your')
+    expect(topics).not.toContain('what')
+    expect(topics).not.toContain('now')
+    expect(topics).not.toContain('just')
+    expect(topics).not.toContain('like')
+    expect(topics).not.toContain('really')
+    expect(topics).not.toContain('going')
+    expect(topics).not.toContain('want')
+    expect(topics).not.toContain('know')
+    expect(topics).not.toContain('think')
+    expect(topics).not.toContain('people')
+    expect(topics).not.toContain('thing')
+    // Domain terms must survive
+    expect(topics).toContain('typescript')
+    expect(topics).toContain('refactoring')
+    expect(topics).toContain('architecture')
+  })
+
+  it('keeps high-frequency domain terms', async () => {
+    const channelName = 'Test Creator'
+
+    // "deployment" appears many times across chunks - must survive
+    const repeatedDomain = Array(15).fill('deployment kubernetes deployment kubernetes deployment').join(' ')
+
+    mockDb.select.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        innerJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([
+            { content: repeatedDomain },
+            { content: repeatedDomain },
+          ]),
+        }),
+      }),
+    } as never)
+
+    const topics = await extractExpertiseTopics(channelName)
+
+    expect(topics).toContain('deployment')
+    expect(topics).toContain('kubernetes')
+  })
+
+  it('drops singleton noise words', async () => {
+    const channelName = 'Test Creator'
+
+    // "flibbertigibbet" appears exactly once - must be excluded by frequency floor
+    // "typescript" appears many times - must survive
+    const content = [
+      Array(5).fill('typescript typescript typescript').join(' '),
+      'flibbertigibbet',
+    ].join(' ')
+
+    mockDb.select.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        innerJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([
+            { content },
+          ]),
+        }),
+      }),
+    } as never)
+
+    const topics = await extractExpertiseTopics(channelName)
+
+    expect(topics).not.toContain('flibbertigibbet')
+    expect(topics).toContain('typescript')
+  })
 })
 
 describe('computeExpertiseEmbedding', () => {
@@ -436,8 +530,30 @@ describe('regeneratePersonaSystemPrompt', () => {
     const channelName = 'Test Creator'
     const existingId = 42
 
-    // Mock transcript fetch for generatePersonaSystemPrompt
-    mockDb.select.mockReturnValue({
+    const existingPersona = {
+      id: existingId,
+      channelName,
+      name: channelName,
+      systemPrompt: 'Old prompt',
+      expertiseTopics: ['React'],
+      expertiseEmbedding: new Array(384).fill(0.1),
+      transcriptCount: 5,
+      regeneratingAt: null,
+      lastRegeneratedAt: null,
+      createdAt: new Date(),
+    }
+
+    // 1st select: existing persona row check
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([existingPersona]),
+        }),
+      }),
+    } as never)
+
+    // 2nd select: transcript samples for generatePersonaSystemPrompt
+    mockDb.select.mockReturnValueOnce({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({
           limit: vi.fn().mockResolvedValue([
@@ -447,17 +563,30 @@ describe('regeneratePersonaSystemPrompt', () => {
       }),
     } as never)
 
+    // 3rd select: chunk content for extractExpertiseTopics (innerJoin path)
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        innerJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([
+            { content: 'react react typescript typescript' },
+            { content: 'react typescript testing testing' },
+          ]),
+        }),
+      }),
+    } as never)
+
     mockGenerateText.mockResolvedValue('Updated v2 system prompt')
 
+    // Mock computeChannelCentroid (used by computeExpertiseEmbedding)
+    const { computeChannelCentroid } = await import('@/lib/channels/similarity')
+    const mockComputeChannelCentroid = vi.mocked(computeChannelCentroid)
+    mockComputeChannelCentroid.mockResolvedValue(new Array(384).fill(0.5))
+
     const updatedPersona = {
-      id: existingId,
-      channelName,
-      name: channelName,
+      ...existingPersona,
       systemPrompt: 'Updated v2 system prompt',
-      expertiseTopics: ['React'],
-      expertiseEmbedding: new Array(384).fill(0.1),
-      transcriptCount: 5,
-      createdAt: new Date(),
+      expertiseTopics: ['react', 'typescript', 'testing'],
+      lastRegeneratedAt: new Date(),
     }
 
     // Mock db.update chain
@@ -481,8 +610,8 @@ describe('regeneratePersonaSystemPrompt', () => {
   it('throws when channel has no persona or videos', async () => {
     const channelName = 'Ghost Channel'
 
-    // Simulate no transcripts found (generatePersonaSystemPrompt throws first)
-    mockDb.select.mockReturnValue({
+    // First select: existing persona check - returns empty (no persona)
+    mockDb.select.mockReturnValueOnce({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({
           limit: vi.fn().mockResolvedValue([]),
@@ -496,12 +625,209 @@ describe('regeneratePersonaSystemPrompt', () => {
   it('throws when no existing persona row exists to update', async () => {
     const channelName = 'New Channel'
 
-    // Transcripts exist but persona update returns empty array (no row)
-    mockDb.select.mockReturnValue({
+    // First select: existing persona check - returns empty (no persona row)
+    mockDb.select.mockReturnValueOnce({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([
-            { transcript: 'Has videos but no persona...' },
+          limit: vi.fn().mockResolvedValue([]),
+        }),
+      }),
+    } as never)
+
+    await expect(regeneratePersonaSystemPrompt(channelName)).rejects.toThrow(
+      'No persona found'
+    )
+  })
+
+  // --- Chunk 3: topics + timestamp + embedding persisted in one update ---
+
+  it('persists fixed topics, lastRegeneratedAt, and rebuilt embedding in one update', async () => {
+    const channelName = 'Test Creator'
+    const existingPersona = {
+      id: 1,
+      channelName,
+      name: channelName,
+      systemPrompt: 'Old prompt',
+      expertiseTopics: ['old'],
+      expertiseEmbedding: new Array(384).fill(0.1),
+      transcriptCount: 7,
+      regeneratingAt: null,
+      lastRegeneratedAt: null,
+      createdAt: new Date(),
+    }
+
+    // 1st select: existing persona row check
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([existingPersona]),
+        }),
+      }),
+    } as never)
+
+    // 2nd select: transcripts for generatePersonaSystemPrompt
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([{ transcript: 'Transcript about deployment kubernetes' }]),
+        }),
+      }),
+    } as never)
+
+    // 3rd select: chunks for extractExpertiseTopics
+    const domainContent = Array(5).fill('deployment kubernetes deployment kubernetes').join(' ')
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        innerJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([
+            { content: domainContent },
+            { content: domainContent },
+          ]),
+        }),
+      }),
+    } as never)
+
+    mockGenerateText.mockResolvedValue('New system prompt')
+
+    const newEmbedding = new Array(384).fill(0.9)
+    const { computeChannelCentroid } = await import('@/lib/channels/similarity')
+    vi.mocked(computeChannelCentroid).mockResolvedValue(newEmbedding)
+
+    let capturedSetPayload: Record<string, unknown> = {}
+    mockDb.update = vi.fn().mockReturnValue({
+      set: vi.fn().mockImplementation((payload: Record<string, unknown>) => {
+        capturedSetPayload = payload
+        return {
+          where: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([{ ...existingPersona, systemPrompt: 'New system prompt', lastRegeneratedAt: new Date() }]),
+          }),
+        }
+      }),
+    })
+
+    await regeneratePersonaSystemPrompt(channelName)
+
+    // All four fields in ONE .set call
+    expect(capturedSetPayload).toHaveProperty('systemPrompt', 'New system prompt')
+    expect(capturedSetPayload).toHaveProperty('expertiseTopics')
+    expect(capturedSetPayload).toHaveProperty('lastRegeneratedAt')
+    expect(capturedSetPayload).toHaveProperty('expertiseEmbedding', newEmbedding)
+    expect(Array.isArray(capturedSetPayload['expertiseTopics'])).toBe(true)
+  })
+
+  it('omits expertiseEmbedding from the update when centroid is null', async () => {
+    const channelName = 'Test Creator'
+    const existingPersona = {
+      id: 1,
+      channelName,
+      name: channelName,
+      systemPrompt: 'Old prompt',
+      expertiseTopics: ['old'],
+      expertiseEmbedding: new Array(384).fill(0.1), // existing embedding - must NOT be clobbered
+      transcriptCount: 7,
+      regeneratingAt: null,
+      lastRegeneratedAt: null,
+      createdAt: new Date(),
+    }
+
+    // 1st select: existing persona row
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([existingPersona]),
+        }),
+      }),
+    } as never)
+
+    // 2nd select: transcripts
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([{ transcript: 'Some transcript' }]),
+        }),
+      }),
+    } as never)
+
+    // 3rd select: chunks for topics
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        innerJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([
+            { content: 'deployment deployment kubernetes kubernetes' },
+            { content: 'deployment kubernetes' },
+          ]),
+        }),
+      }),
+    } as never)
+
+    mockGenerateText.mockResolvedValue('New system prompt')
+
+    // Centroid returns null - no chunk embeddings yet
+    const { computeChannelCentroid } = await import('@/lib/channels/similarity')
+    vi.mocked(computeChannelCentroid).mockResolvedValue(null)
+
+    let capturedSetPayload: Record<string, unknown> = {}
+    mockDb.update = vi.fn().mockReturnValue({
+      set: vi.fn().mockImplementation((payload: Record<string, unknown>) => {
+        capturedSetPayload = payload
+        return {
+          where: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([{ ...existingPersona, systemPrompt: 'New system prompt' }]),
+          }),
+        }
+      }),
+    })
+
+    await regeneratePersonaSystemPrompt(channelName)
+
+    // expertiseEmbedding key must be ABSENT - never clobber with null
+    expect(Object.prototype.hasOwnProperty.call(capturedSetPayload, 'expertiseEmbedding')).toBe(false)
+    // Other fields must still be present
+    expect(capturedSetPayload).toHaveProperty('systemPrompt')
+    expect(capturedSetPayload).toHaveProperty('expertiseTopics')
+    expect(capturedSetPayload).toHaveProperty('lastRegeneratedAt')
+  })
+
+  it('does not touch id or transcriptCount in the update payload', async () => {
+    const channelName = 'Test Creator'
+    const existingPersona = {
+      id: 99,
+      channelName,
+      name: channelName,
+      systemPrompt: 'Old prompt',
+      expertiseTopics: ['old'],
+      expertiseEmbedding: null,
+      transcriptCount: 12,
+      regeneratingAt: null,
+      lastRegeneratedAt: null,
+      createdAt: new Date(),
+    }
+
+    // 1st select: existing persona row
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([existingPersona]),
+        }),
+      }),
+    } as never)
+
+    // 2nd select: transcripts
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([{ transcript: 'Some transcript' }]),
+        }),
+      }),
+    } as never)
+
+    // 3rd select: chunks for topics
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        innerJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([
+            { content: 'deployment deployment kubernetes kubernetes' },
+            { content: 'deployment kubernetes' },
           ]),
         }),
       }),
@@ -509,16 +835,25 @@ describe('regeneratePersonaSystemPrompt', () => {
 
     mockGenerateText.mockResolvedValue('New prompt')
 
+    const { computeChannelCentroid } = await import('@/lib/channels/similarity')
+    vi.mocked(computeChannelCentroid).mockResolvedValue(null)
+
+    let capturedSetPayload: Record<string, unknown> = {}
     mockDb.update = vi.fn().mockReturnValue({
-      set: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          returning: vi.fn().mockResolvedValue([]),
-        }),
+      set: vi.fn().mockImplementation((payload: Record<string, unknown>) => {
+        capturedSetPayload = payload
+        return {
+          where: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([existingPersona]),
+          }),
+        }
       }),
     })
 
-    await expect(regeneratePersonaSystemPrompt(channelName)).rejects.toThrow(
-      'No persona found'
-    )
+    await regeneratePersonaSystemPrompt(channelName)
+
+    // id and transcriptCount must NOT be in the SET payload
+    expect(Object.prototype.hasOwnProperty.call(capturedSetPayload, 'id')).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(capturedSetPayload, 'transcriptCount')).toBe(false)
   })
 })

@@ -58,6 +58,8 @@ describe('POST /api/personas/[id]/query', () => {
     expertiseTopics: ['programming', 'typescript'],
     expertiseEmbedding: null,
     transcriptCount: 30,
+    regeneratingAt: null,
+    lastRegeneratedAt: null,
     createdAt: new Date(),
   }
 
@@ -69,6 +71,8 @@ describe('POST /api/personas/[id]/query', () => {
     expertiseTopics: ['databases'],
     expertiseEmbedding: [0.1, 0.2] as unknown as Persona['expertiseEmbedding'],
     transcriptCount: 40,
+    regeneratingAt: null,
+    lastRegeneratedAt: null,
     createdAt: new Date(),
   }
 

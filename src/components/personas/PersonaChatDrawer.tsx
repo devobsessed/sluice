@@ -40,6 +40,12 @@ interface PersonaChatDrawerProps {
    * Return false to signal the switch was refused (resets the chip's loading state).
    */
   onPersonaSwitch?: (personaId: number, personaName: string, carryQuestion: string) => boolean | void
+  /**
+   * ISO timestamp of the last completed regeneration for this persona.
+   * Passed through to PersonaActionsMenu to render "last updated X ago".
+   * Null/undefined when the persona has never been regenerated.
+   */
+  lastRegeneratedAt?: string | null
 }
 
 interface PersonaAvatarProps {
@@ -206,6 +212,7 @@ export function PersonaChatDrawer({
   embedded = false,
   onBack,
   onPersonaSwitch,
+  lastRegeneratedAt,
 }: PersonaChatDrawerProps) {
   const { state, liveSources, handoff, facts, rememberedBoundaries, sendMessage, clearHistory, startNewThread, removeFact, clearFacts } = usePersonaChat(personaId, channelName)
   const [inputValue, setInputValue] = useState('')
@@ -400,6 +407,7 @@ export function PersonaChatDrawer({
           facts={facts}
           onRemoveFact={removeFact}
           onClearFacts={clearFacts}
+          lastRegeneratedAt={lastRegeneratedAt}
         />
       </SheetHeader>
 

@@ -1,3 +1,4 @@
+import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -50,7 +51,7 @@ const defaultProps = {
   expertiseTopics: ['React', 'TypeScript', 'Next.js', 'Svelte'],
 }
 
-function renderDrawer(props: Partial<typeof defaultProps & { onPersonaSwitch?: (id: number, name: string, question: string) => void }> = {}) {
+function renderDrawer(props: Partial<React.ComponentProps<typeof PersonaChatDrawer>> = {}) {
   return render(<PersonaChatDrawer {...defaultProps} {...props} />)
 }
 
@@ -578,6 +579,27 @@ describe('PersonaChatDrawer', () => {
     renderDrawer()
     const input = screen.getByPlaceholderText('Ask Fireship anything...')
     expect(input).toHaveClass('text-base')
+  })
+
+  // ── last-updated indicator wiring tests ───────────────────────────────────────
+
+  describe('last-updated indicator wiring', () => {
+    it('renders "last updated X ago" indicator inside drawer when lastRegeneratedAt is provided', () => {
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+      renderDrawer({ lastRegeneratedAt: twoHoursAgo })
+      expect(screen.getByText(/last updated/i)).toBeInTheDocument()
+      expect(screen.getByText(/ago/i)).toBeInTheDocument()
+    })
+
+    it('does not render "last updated" text inside drawer when lastRegeneratedAt is null', () => {
+      renderDrawer({ lastRegeneratedAt: null })
+      expect(screen.queryByText(/last updated/i)).not.toBeInTheDocument()
+    })
+
+    it('does not render "last updated" text inside drawer when lastRegeneratedAt is omitted', () => {
+      renderDrawer()
+      expect(screen.queryByText(/last updated/i)).not.toBeInTheDocument()
+    })
   })
 
   // ── Handoff chip tests ────────────────────────────────────────────────────────
