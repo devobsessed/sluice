@@ -394,7 +394,7 @@ export function PersonaStatus({ onActivePersonasChange }: PersonaStatusProps) {
           if (!open) setRebuildConfirm(null)
         }}
       >
-        <DialogContent showCloseButton={false}>
+        <DialogContent showCloseButton={false} aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>
               Rebuild {rebuildConfirm?.personaDisplayName} from {rebuildConfirm?.newCount} new videos?
