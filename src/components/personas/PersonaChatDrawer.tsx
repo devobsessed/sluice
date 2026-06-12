@@ -528,11 +528,11 @@ export function PersonaChatDrawer({
                     <div className="flex flex-col gap-1.5 py-0.5">
                       <div
                         data-testid="streaming-skeleton"
-                        className="h-3 w-32 rounded bg-muted-foreground/20 animate-pulse"
+                        className="h-3 w-32 rounded bg-muted-foreground/20 motion-safe:animate-pulse"
                       />
                       <div
                         data-testid="streaming-skeleton"
-                        className="h-3 w-24 rounded bg-muted-foreground/20 animate-pulse"
+                        className="h-3 w-24 rounded bg-muted-foreground/20 motion-safe:animate-pulse"
                       />
                     </div>
                   ) : (
@@ -566,12 +566,12 @@ export function PersonaChatDrawer({
                     disabled={handoffLoading}
                     aria-label={`Ask ${handoff.personaName} instead`}
                     className={cn(
-                      'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium',
+                      'group flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium',
                       'bg-emerald-100 text-emerald-700',
-                      'motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-200',
+                      'motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-200 motion-safe:ease-out',
                       'transition-colors',
                       handoffLoading
-                        ? 'opacity-60 animate-pulse cursor-not-allowed'
+                        ? 'opacity-60 motion-safe:animate-pulse cursor-not-allowed'
                         : 'hover:bg-emerald-200 cursor-pointer'
                     )}
                   >

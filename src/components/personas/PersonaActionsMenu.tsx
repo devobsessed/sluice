@@ -183,7 +183,7 @@ export function PersonaActionsMenu({
               {facts.map((fact, idx) => (
                 <li
                   key={idx}
-                  className="group flex items-center justify-between gap-2 px-2 py-1 rounded-md bg-background"
+                  className="group flex items-center justify-between gap-2 px-2 py-1 rounded-md bg-secondary"
                 >
                   <span className="flex items-center gap-1.5 text-xs text-foreground min-w-0">
                     <span
