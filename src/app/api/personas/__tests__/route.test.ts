@@ -122,6 +122,8 @@ describe('POST /api/personas', () => {
       expertiseTopics: ['React', 'TypeScript'],
       expertiseEmbedding: new Array(384).fill(0.5),
       transcriptCount: 50,
+      regeneratingAt: null,
+      lastRegeneratedAt: null,
       createdAt: new Date(),
     }
 

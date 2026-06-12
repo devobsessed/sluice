@@ -4,15 +4,27 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 type ChannelStatus = {
   channelName: string | null
   transcriptCount: number
+  personaTranscriptCount: number | null
   personaId: number | null
   personaCreatedAt: string | null
   personaName: string | null
   expertiseTopics: unknown
+  lastRegeneratedAt: string | null
+  regeneratingAt: string | null
 }
 
 // Mock db query results
 let mockChannelCountResults: { channelName: string | null; transcriptCount: number }[] = []
-let mockPersonaResults: { id: number; channelName: string; createdAt: Date | null; name: string; expertiseTopics: unknown }[] = []
+let mockPersonaResults: {
+  id: number
+  channelName: string
+  createdAt: Date | null
+  name: string
+  expertiseTopics: unknown
+  lastRegeneratedAt: Date | null
+  regeneratingAt: Date | null
+  transcriptCount: number
+}[] = []
 let mockShouldThrow = false
 let selectCallIndex = 0
 
@@ -115,7 +127,7 @@ describe('GET /api/personas/status', () => {
       { channelName: 'Anthropic', transcriptCount: 1 },
     ]
     mockPersonaResults = [
-      { id: 1, channelName: 'Nate B Jones', createdAt: personaCreatedAt, name: 'Nate', expertiseTopics: null },
+      { id: 1, channelName: 'Nate B Jones', createdAt: personaCreatedAt, name: 'Nate', expertiseTopics: null, lastRegeneratedAt: null, regeneratingAt: null, transcriptCount: 3 },
     ]
 
     const response = await GET()
@@ -147,7 +159,7 @@ describe('GET /api/personas/status', () => {
       { channelName: 'Channel C', transcriptCount: 3 },
     ]
     mockPersonaResults = [
-      { id: 1, channelName: 'Channel A', createdAt: new Date(), name: 'Persona A', expertiseTopics: null },
+      { id: 1, channelName: 'Channel A', createdAt: new Date(), name: 'Persona A', expertiseTopics: null, lastRegeneratedAt: null, regeneratingAt: null, transcriptCount: 2 },
     ]
 
     const response = await GET()
@@ -198,5 +210,149 @@ describe('GET /api/personas/status', () => {
 
     expect(response.status).toBe(500)
     expect(data.error).toBe('Failed to fetch persona status')
+  })
+
+  it('status response includes lastRegeneratedAt and regeneratingAt per channel - null when no persona', async () => {
+    mockChannelCountResults = [
+      { channelName: 'Solo Channel', transcriptCount: 2 },
+    ]
+    // no personas
+
+    const response = await GET()
+    const data = await response.json()
+
+    expect(response.status).toBe(200)
+    const channel = data.channels[0] as ChannelStatus
+    expect(channel).toHaveProperty('lastRegeneratedAt', null)
+    expect(channel).toHaveProperty('regeneratingAt', null)
+  })
+
+  it('status response includes lastRegeneratedAt and regeneratingAt when persona has timestamps', async () => {
+    const lastRegenAt = new Date('2026-06-10T12:00:00Z')
+    const regenAt = new Date('2026-06-12T09:00:00Z')
+    mockChannelCountResults = [
+      { channelName: 'Active Channel', transcriptCount: 8 },
+    ]
+    mockPersonaResults = [
+      {
+        id: 2,
+        channelName: 'Active Channel',
+        createdAt: new Date('2026-05-01T00:00:00Z'),
+        name: 'Active Persona',
+        expertiseTopics: null,
+        lastRegeneratedAt: lastRegenAt,
+        regeneratingAt: regenAt,
+        transcriptCount: 6,
+      },
+    ]
+
+    const response = await GET()
+    const data = await response.json()
+
+    expect(response.status).toBe(200)
+    const channel = data.channels[0] as ChannelStatus
+    expect(channel.lastRegeneratedAt).toBe(lastRegenAt.toISOString())
+    expect(channel.regeneratingAt).toBe(regenAt.toISOString())
+  })
+
+  it('status response includes lastRegeneratedAt null when persona has not been regenerated', async () => {
+    mockChannelCountResults = [
+      { channelName: 'Fresh Channel', transcriptCount: 5 },
+    ]
+    mockPersonaResults = [
+      {
+        id: 3,
+        channelName: 'Fresh Channel',
+        createdAt: new Date('2026-06-01T00:00:00Z'),
+        name: 'Fresh Persona',
+        expertiseTopics: null,
+        lastRegeneratedAt: null,
+        regeneratingAt: null,
+        transcriptCount: 5,
+      },
+    ]
+
+    const response = await GET()
+    const data = await response.json()
+
+    expect(response.status).toBe(200)
+    const channel = data.channels[0] as ChannelStatus
+    expect(channel.lastRegeneratedAt).toBeNull()
+    expect(channel.regeneratingAt).toBeNull()
+  })
+
+  describe('personaTranscriptCount (staleness baseline)', () => {
+    it('exposes personaTranscriptCount distinct from transcriptCount - current count != at-gen count', async () => {
+      // Channel has 8 videos now; persona was built when there were 5
+      mockChannelCountResults = [
+        { channelName: 'Stale Channel', transcriptCount: 8 },
+      ]
+      mockPersonaResults = [
+        {
+          id: 10,
+          channelName: 'Stale Channel',
+          createdAt: new Date('2026-01-01T00:00:00Z'),
+          name: 'Stale Persona',
+          expertiseTopics: null,
+          lastRegeneratedAt: null,
+          regeneratingAt: null,
+          transcriptCount: 5,
+        },
+      ]
+
+      const response = await GET()
+      const data = await response.json()
+
+      expect(response.status).toBe(200)
+      const channel = data.channels[0] as ChannelStatus
+      // Live channel count (from videos GROUP BY)
+      expect(channel.transcriptCount).toBe(8)
+      // At-generation snapshot (from personas.transcript_count)
+      expect(channel.personaTranscriptCount).toBe(5)
+      // The two fields are distinct - staleness delta = 8 - 5 = 3
+      expect(channel.transcriptCount).not.toBe(channel.personaTranscriptCount)
+    })
+
+    it('returns personaTranscriptCount as null when no persona exists', async () => {
+      mockChannelCountResults = [
+        { channelName: 'No Persona Channel', transcriptCount: 6 },
+      ]
+      // no personas
+
+      const response = await GET()
+      const data = await response.json()
+
+      expect(response.status).toBe(200)
+      const channel = data.channels[0] as ChannelStatus
+      expect(channel.transcriptCount).toBe(6)
+      expect(channel.personaTranscriptCount).toBeNull()
+    })
+
+    it('returns personaTranscriptCount matching the persona at-gen count when up-to-date', async () => {
+      // Channel has 7 videos and persona was built from all 7 - not stale
+      mockChannelCountResults = [
+        { channelName: 'Fresh Channel', transcriptCount: 7 },
+      ]
+      mockPersonaResults = [
+        {
+          id: 11,
+          channelName: 'Fresh Channel',
+          createdAt: new Date('2026-06-01T00:00:00Z'),
+          name: 'Fresh Persona',
+          expertiseTopics: null,
+          lastRegeneratedAt: null,
+          regeneratingAt: null,
+          transcriptCount: 7,
+        },
+      ]
+
+      const response = await GET()
+      const data = await response.json()
+
+      expect(response.status).toBe(200)
+      const channel = data.channels[0] as ChannelStatus
+      expect(channel.transcriptCount).toBe(7)
+      expect(channel.personaTranscriptCount).toBe(7)
+    })
   })
 })

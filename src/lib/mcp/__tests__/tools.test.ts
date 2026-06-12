@@ -914,6 +914,8 @@ describe('ensemble_query', () => {
         expertiseTopics: ['react'],
         expertiseEmbedding: new Array(384).fill(0.5),
         transcriptCount: 10,
+        regeneratingAt: null,
+        lastRegeneratedAt: null,
         createdAt: new Date(),
       },
       {
@@ -924,6 +926,8 @@ describe('ensemble_query', () => {
         expertiseTopics: ['typescript'],
         expertiseEmbedding: new Array(384).fill(0.3),
         transcriptCount: 8,
+        regeneratingAt: null,
+        lastRegeneratedAt: null,
         createdAt: new Date(),
       },
       {
@@ -934,6 +938,8 @@ describe('ensemble_query', () => {
         expertiseTopics: ['vue'],
         expertiseEmbedding: new Array(384).fill(0.2),
         transcriptCount: 6,
+        regeneratingAt: null,
+        lastRegeneratedAt: null,
         createdAt: new Date(),
       },
     ]
@@ -1014,6 +1020,8 @@ describe('ensemble_query', () => {
         expertiseTopics: ['react'],
         expertiseEmbedding: new Array(384).fill(0.5),
         transcriptCount: 10,
+        regeneratingAt: null,
+        lastRegeneratedAt: null,
         createdAt: new Date(),
       },
       {
@@ -1024,6 +1032,8 @@ describe('ensemble_query', () => {
         expertiseTopics: ['typescript'],
         expertiseEmbedding: new Array(384).fill(0.3),
         transcriptCount: 8,
+        regeneratingAt: null,
+        lastRegeneratedAt: null,
         createdAt: new Date(),
       },
     ]

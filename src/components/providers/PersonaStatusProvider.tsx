@@ -5,10 +5,18 @@ import { createContext, useContext, useEffect, useState, useCallback } from 'rea
 export interface PersonaChannel {
   channelName: string
   transcriptCount: number
+  /** Count of videos at the time the persona was last built (at-generation snapshot).
+   *  NULL when no persona exists for this channel.
+   *  Distinct from `transcriptCount` (live channel count) - used to derive staleness delta. */
+  personaTranscriptCount: number | null
   personaId: number | null
   personaCreatedAt: string | null
   personaName: string | null
   expertiseTopics: string[] | null
+  /** ISO timestamp of the last completed regeneration; null when persona has never been regenerated */
+  lastRegeneratedAt: string | null
+  /** ISO timestamp of an in-flight regeneration lock; null when idle */
+  regeneratingAt: string | null
 }
 
 interface PersonaStatusContextValue {

@@ -42,6 +42,8 @@ describe('POST /api/personas/ensemble', () => {
       expertiseTopics: ['vim', 'performance'],
       expertiseEmbedding: Array.from({ length: 384 }, () => 0.1),
       transcriptCount: 50,
+      regeneratingAt: null,
+      lastRegeneratedAt: null,
       createdAt: new Date(),
     },
     {
@@ -52,6 +54,8 @@ describe('POST /api/personas/ensemble', () => {
       expertiseTopics: ['react', 'javascript'],
       expertiseEmbedding: Array.from({ length: 384 }, () => 0.2),
       transcriptCount: 40,
+      regeneratingAt: null,
+      lastRegeneratedAt: null,
       createdAt: new Date(),
     },
   ]

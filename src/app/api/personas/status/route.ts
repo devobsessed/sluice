@@ -29,6 +29,9 @@ export async function GET() {
           createdAt: personas.createdAt,
           name: personas.name,
           expertiseTopics: personas.expertiseTopics,
+          lastRegeneratedAt: personas.lastRegeneratedAt,
+          regeneratingAt: personas.regeneratingAt,
+          transcriptCount: personas.transcriptCount,
         })
         .from(personas),
     ])
@@ -43,10 +46,13 @@ export async function GET() {
       return {
         channelName: ch.channelName,
         transcriptCount: ch.transcriptCount,
+        personaTranscriptCount: persona?.transcriptCount ?? null,
         personaId: persona?.id ?? null,
         personaCreatedAt: persona?.createdAt ?? null,
         personaName: persona?.name ?? null,
         expertiseTopics: persona?.expertiseTopics ?? null,
+        lastRegeneratedAt: persona?.lastRegeneratedAt ?? null,
+        regeneratingAt: persona?.regeneratingAt ?? null,
       }
     })
 

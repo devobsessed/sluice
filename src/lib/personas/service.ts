@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm'
+import { eq, sql, and, or, isNull, lt } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { db as database, videos, chunks, personas } from '@/lib/db'
 import type * as schema from '@/lib/db/schema'
@@ -14,6 +14,117 @@ const PERSONA_TRANSCRIPT_SAMPLE_LIMIT = 20
 
 /** Maximum combined transcript character length to send to Claude */
 const PERSONA_TRANSCRIPT_CHAR_LIMIT = 30000
+
+/** Poll interval (ms) used by waitForRegenerationToClear */
+const LOCK_POLL_INTERVAL_MS = 500
+
+/**
+ * Attempts to atomically claim the regeneration lock on a persona row.
+ *
+ * Issues a single conditional UPDATE:
+ *   SET regenerating_at = now()
+ *   WHERE id = :id AND (regenerating_at IS NULL OR regenerating_at < now() - :staleAfterMs ms)
+ *
+ * Postgres serializes concurrent UPDATEs on the same row, so exactly one
+ * caller's predicate can be satisfied - the single-winner guarantee.
+ *
+ * @param personaId - Primary key of the persona row
+ * @param staleAfterMs - Milliseconds after which an existing lock is treated
+ *   as dead and reclaimable (should match the route maxDuration budget)
+ * @param db - Database instance (defaults to singleton)
+ * @returns true if this caller claimed the lock, false if another holds it
+ */
+export async function claimRegenerationLock(
+  personaId: number,
+  staleAfterMs: number,
+  db: NodePgDatabase<typeof schema> = database
+): Promise<boolean> {
+  const staleIntervalSec = staleAfterMs / 1000
+  const updated = await db
+    .update(personas)
+    .set({ regeneratingAt: sql`now()` })
+    .where(
+      and(
+        eq(personas.id, personaId),
+        or(
+          isNull(personas.regeneratingAt),
+          lt(
+            personas.regeneratingAt,
+            sql`now() - (${staleIntervalSec} || ' seconds')::interval`
+          )
+        )
+      )
+    )
+    .returning({ id: personas.id })
+
+  return updated.length === 1
+}
+
+/**
+ * Releases the regeneration lock on a persona row.
+ *
+ * Called in `finally` by the lock owner so the next caller can claim
+ * immediately. The stale-lock predicate in claimRegenerationLock covers
+ * process-death cases where finally never runs.
+ *
+ * @param personaId - Primary key of the persona row
+ * @param db - Database instance (defaults to singleton)
+ */
+export async function releaseRegenerationLock(
+  personaId: number,
+  db: NodePgDatabase<typeof schema> = database
+): Promise<void> {
+  await db
+    .update(personas)
+    .set({ regeneratingAt: null })
+    .where(eq(personas.id, personaId))
+}
+
+/**
+ * Polls the persona row until regenerating_at IS NULL, then returns the
+ * fresh row. Used by the lock loser (joiner) to wait for the owner to finish
+ * and then return the owner's result.
+ *
+ * @param personaId - Primary key of the persona row
+ * @param timeoutMs - Maximum time to wait before throwing
+ * @param db - Database instance (defaults to singleton)
+ * @returns The fresh Persona row after the lock has been released
+ * @throws Error if timeoutMs is exceeded before the lock clears
+ */
+export async function waitForRegenerationToClear(
+  personaId: number,
+  timeoutMs: number,
+  db: NodePgDatabase<typeof schema> = database
+): Promise<Persona> {
+  const deadline = Date.now() + timeoutMs
+
+  while (Date.now() < deadline) {
+    const [row] = await db
+      .select()
+      .from(personas)
+      .where(eq(personas.id, personaId))
+      .limit(1)
+
+    if (!row) {
+      throw new Error(`Persona ${personaId} not found while waiting for lock to clear`)
+    }
+
+    if (row.regeneratingAt === null) {
+      return row
+    }
+
+    // Still locked - wait before polling again, but respect the deadline
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) break
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.min(LOCK_POLL_INTERVAL_MS, remaining))
+    )
+  }
+
+  throw new Error(
+    `waitForRegenerationToClear timed out after ${timeoutMs}ms for persona ${personaId}`
+  )
+}
 
 /**
  * Generates a persona system prompt by analyzing the creator's content.
@@ -88,8 +199,17 @@ Write in second person ("You are..."). Be specific and concrete - use phrases an
  * Regenerates the v2 persona system prompt for an existing persona and
  * updates the row in place.
  *
- * Preserves `id`, `expertiseEmbedding`, `expertiseTopics`, and `transcriptCount`
- * so localStorage chat history (keyed by personaId) remains valid.
+ * Persists systemPrompt, expertiseTopics (using the fixed extractor),
+ * lastRegeneratedAt, and transcriptCount (advanced to the current channel
+ * video count) in a single UPDATE. Also rebuilds expertiseEmbedding when
+ * computeExpertiseEmbedding returns a non-null vector - omits the key entirely
+ * when null so an existing embedding is never clobbered.
+ *
+ * Advancing transcriptCount clears the staleness badge: the at-generation
+ * snapshot becomes the current count so the delta returns to zero.
+ *
+ * Preserves `id` so localStorage chat history (keyed by personaId) remains
+ * valid.
  *
  * @param channelName - Name of the channel whose persona to update
  * @param db - Database instance (defaults to singleton)
@@ -113,13 +233,52 @@ export async function regeneratePersonaSystemPrompt(
     throw new Error(`No persona found for channel "${channelName}"`)
   }
 
-  // Regenerate the system prompt using the v2 builder
-  const systemPrompt = await generatePersonaSystemPrompt(channelName, db)
+  // Count current channel videos so the baseline advances to the real count
+  // after rebuild (mirrors createPersona's pattern - select video ids by channel,
+  // take .length). This clears the staleness badge: transcript_count becomes
+  // the current count and the gap returns to zero.
+  const currentVideoRecords = await db
+    .select({ id: videos.id })
+    .from(videos)
+    .where(eq(videos.channel, channelName))
+
+  const currentTranscriptCount = currentVideoRecords.length
+
+  // Regenerate all three content fields in parallel where possible.
+  // generatePersonaSystemPrompt and extractExpertiseTopics both hit the DB but
+  // are independent - run concurrently to keep the Claude round-trip on the
+  // critical path only.
+  const [systemPrompt, expertiseTopics, expertiseEmbedding] = await Promise.all([
+    generatePersonaSystemPrompt(channelName, db),
+    extractExpertiseTopics(channelName, db),
+    computeExpertiseEmbedding(channelName, db),
+  ])
+
+  // Build the SET payload. expertiseEmbedding is null-guarded: omit the key
+  // entirely when the centroid cannot be computed so an existing (non-null)
+  // embedding is never overwritten with NULL. transcriptCount advances to the
+  // current channel count so the staleness badge clears after a rebuild.
+  const setPayload: {
+    systemPrompt: string
+    expertiseTopics: string[]
+    lastRegeneratedAt: Date
+    transcriptCount: number
+    expertiseEmbedding?: number[]
+  } = {
+    systemPrompt,
+    expertiseTopics,
+    lastRegeneratedAt: new Date(),
+    transcriptCount: currentTranscriptCount,
+  }
+
+  if (expertiseEmbedding !== null) {
+    setPayload.expertiseEmbedding = expertiseEmbedding
+  }
 
   // UPDATE in place - never insert; preserves id so localStorage history stays attached
   const [updated] = await db
     .update(personas)
-    .set({ systemPrompt })
+    .set(setPayload)
     .where(eq(personas.channelName, channelName))
     .returning()
 
@@ -157,50 +316,57 @@ export async function extractExpertiseTopics(
     return []
   }
 
-  // Simple topic extraction: find most common meaningful words
-  // This is a basic implementation - could be enhanced with NLP
+  // Topic extraction: find most common meaningful words
+  // Expanded stopword set covers the walk-003 class (possessives, pronouns,
+  // common adverbs, filler verbs) that passed the narrow original set.
   const wordFrequency = new Map<string, number>()
   const stopWords = new Set([
-    'the',
-    'a',
-    'an',
-    'and',
-    'or',
-    'but',
-    'in',
-    'on',
-    'at',
-    'to',
-    'for',
-    'of',
-    'with',
-    'by',
-    'from',
-    'as',
-    'is',
-    'was',
-    'are',
-    'be',
-    'this',
-    'that',
-    'it',
-    'you',
-    'we',
-    'they',
-    'can',
-    'will',
-    'have',
-    'has',
-    'had',
-    'do',
-    'does',
-    'did',
+    // Articles / conjunctions / prepositions
+    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+    'of', 'with', 'by', 'from', 'as', 'into', 'out', 'about', 'over',
+    'after', 'before', 'between', 'through', 'during', 'without', 'within',
+    // Pronouns / possessives (walk-003: "your")
+    'you', 'your', 'yours', 'we', 'our', 'ours', 'they', 'their', 'theirs',
+    'it', 'its', 'he', 'she', 'his', 'her', 'hers', 'who', 'whom',
+    // Question words / common adverbs (walk-003: "what", "now")
+    'what', 'when', 'where', 'which', 'how', 'why', 'not', 'now', 'then',
+    'here', 'there', 'very', 'just', 'also', 'only', 'even', 'still',
+    'really', 'actually', 'basically', 'literally', 'exactly', 'already',
+    'quite', 'maybe', 'always', 'never', 'often', 'again', 'ever',
+    // Common filler verbs / modals (walk-003: "going", "want", "know", "think")
+    'is', 'was', 'are', 'be', 'been', 'being', 'have', 'has', 'had',
+    'do', 'does', 'did', 'can', 'will', 'would', 'could', 'should', 'may',
+    'might', 'must', 'shall', 'get', 'got', 'say', 'said', 'see', 'saw',
+    'come', 'came', 'make', 'made', 'take', 'took', 'give', 'gave',
+    'going', 'want', 'know', 'think', 'need', 'look', 'feel', 'seem',
+    'like', 'let', 'put', 'use', 'try', 'ask', 'keep', 'start', 'work', 'mean',
+    // Common nouns that are too generic to be topics (walk-003: "people", "thing")
+    'this', 'that', 'these', 'those', 'some', 'any', 'all', 'each',
+    'every', 'both', 'few', 'more', 'most', 'other', 'another', 'such',
+    'same', 'way', 'time', 'year', 'day', 'man', 'men', 'one', 'two',
+    'three', 'people', 'person', 'thing', 'things', 'lot', 'bit', 'part',
+    'case', 'kind', 'sort', 'type', 'much', 'many', 'well', 'right',
+    'left', 'new', 'old', 'big', 'good', 'bad', 'able', 'sure', 'long',
+    // Spoken-transcript fillers (live rebuild surfaced "because/yeah/okay")
+    'because', 'yeah', 'okay', 'yes', 'stuff', 'something', 'everything',
+    'anything', 'someone', 'everyone', 'somebody', 'anybody', 'nobody',
+    'gonna', 'wanna', 'gotta',
+    // Function words surfaced by real-data dry run ("them" ranked #1 for a channel)
+    'them', 'than', 'too', 'down', 'called', 'different', 'better', 'worse',
+    'were', 'doing', 'done', 'little', 'back', 'around', 'away', 'else',
+    // Contraction stems - backstop for apostrophe variants the regex splits
+    'don', 'didn', 'doesn', 'isn', 'wasn', 'weren', 'aren', 'haven',
+    'hasn', 'hadn', 'wouldn', 'couldn', 'shouldn',
   ])
 
   for (const chunk of channelChunks) {
     const words = chunk.content
       .toLowerCase()
-      .match(/\b[a-z]{3,}\b/g) || []
+      // Drop negation contractions wholesale ("don't" must not shed "don")
+      .replace(/\b[a-z]+n['’]t\b/g, ' ')
+      // Strip clitic suffixes so legitimate stems survive ("creator's" -> "creator")
+      .replace(/['’](s|re|ve|ll|d|m)\b/g, '')
+      .match(/\b[a-z]{3,}\b/g) ?? []
 
     for (const word of words) {
       if (!stopWords.has(word)) {
@@ -209,8 +375,10 @@ export async function extractExpertiseTopics(
     }
   }
 
-  // Sort by frequency and take top 10
+  // Sort by frequency, apply minimum-frequency floor (> 1) to drop singletons,
+  // then take top 10
   const topics = Array.from(wordFrequency.entries())
+    .filter(([, freq]) => freq > 1)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 10)
     .map(([word]) => word)

@@ -58,6 +58,8 @@ describe('POST /api/personas/[id]/query', () => {
     expertiseTopics: ['programming', 'typescript'],
     expertiseEmbedding: null,
     transcriptCount: 30,
+    regeneratingAt: null,
+    lastRegeneratedAt: null,
     createdAt: new Date(),
   }
 
@@ -69,6 +71,8 @@ describe('POST /api/personas/[id]/query', () => {
     expertiseTopics: ['databases'],
     expertiseEmbedding: [0.1, 0.2] as unknown as Persona['expertiseEmbedding'],
     transcriptCount: 40,
+    regeneratingAt: null,
+    lastRegeneratedAt: null,
     createdAt: new Date(),
   }
 
@@ -392,7 +396,7 @@ describe('POST /api/personas/[id]/query', () => {
   })
 
   it('emits handoff event when another persona exceeds margin', async () => {
-    // Current persona (id=1) scores 0.60; other persona (id=2) scores 0.82 - margin 0.22 >= 0.15
+    // Current persona (id=1) scores 0.60; other persona (id=2) scores 0.82 - margin 0.22 >= 0.10
     mockFindBestPersonas.mockResolvedValue([
       { persona: mockOtherPersona, score: 0.82 },
       { persona: mockPersona, score: 0.60 },
@@ -527,7 +531,7 @@ describe('POST /api/personas/[id]/query', () => {
   })
 
   it('does NOT emit handoff when margin is below threshold', async () => {
-    // Other persona scores higher but only by 0.10, below HANDOFF_MARGIN=0.15
+    // Other persona scores higher but only by 0.08, below HANDOFF_MARGIN=0.10
     mockFindBestPersonas.mockResolvedValue([
       { persona: mockOtherPersona, score: 0.80 },
       { persona: mockPersona, score: 0.72 },

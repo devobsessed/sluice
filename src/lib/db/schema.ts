@@ -197,6 +197,8 @@ export const personas = pgTable('personas', {
   expertiseTopics: jsonb('expertise_topics'), // Array of topic strings
   expertiseEmbedding: vector('expertise_embedding', { dimensions: 384 }), // Centroid of expertise chunks
   transcriptCount: integer('transcript_count').notNull(), // Cached count at creation
+  regeneratingAt: timestamp('regenerating_at'), // Lock: NULL = not locked, non-NULL = in-flight
+  lastRegeneratedAt: timestamp('last_regenerated_at'), // Source for "last updated X ago"
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 

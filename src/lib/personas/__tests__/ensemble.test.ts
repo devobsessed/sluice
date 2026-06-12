@@ -35,6 +35,8 @@ describe('findBestPersonas', () => {
       expertiseTopics: ['vim', 'performance'],
       expertiseEmbedding: Array.from({ length: 384 }, (_, i) => i === 0 ? 1 : 0),
       transcriptCount: 50,
+      regeneratingAt: null,
+      lastRegeneratedAt: null,
       createdAt: new Date(),
     },
     {
@@ -45,6 +47,8 @@ describe('findBestPersonas', () => {
       expertiseTopics: ['react', 'javascript'],
       expertiseEmbedding: Array.from({ length: 384 }, (_, i) => i === 1 ? 1 : 0),
       transcriptCount: 40,
+      regeneratingAt: null,
+      lastRegeneratedAt: null,
       createdAt: new Date(),
     },
     {
@@ -55,6 +59,8 @@ describe('findBestPersonas', () => {
       expertiseTopics: ['general'],
       expertiseEmbedding: null,
       transcriptCount: 30,
+      regeneratingAt: null,
+      lastRegeneratedAt: null,
       createdAt: new Date(),
     },
   ]
@@ -164,6 +170,8 @@ describe('streamEnsembleResponse', () => {
       expertiseTopics: ['vim', 'performance'],
       expertiseEmbedding: Array.from({ length: 384 }, () => 0.1),
       transcriptCount: 50,
+      regeneratingAt: null,
+      lastRegeneratedAt: null,
       createdAt: new Date(),
     },
     {
@@ -174,6 +182,8 @@ describe('streamEnsembleResponse', () => {
       expertiseTopics: ['react', 'javascript'],
       expertiseEmbedding: Array.from({ length: 384 }, () => 0.2),
       transcriptCount: 40,
+      regeneratingAt: null,
+      lastRegeneratedAt: null,
       createdAt: new Date(),
     },
   ]

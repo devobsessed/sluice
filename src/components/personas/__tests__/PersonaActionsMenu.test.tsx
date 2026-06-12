@@ -137,4 +137,161 @@ describe('PersonaActionsMenu', () => {
       expect(screen.getByRole('menuitem', { name: /regenerate persona/i })).toBeInTheDocument()
     })
   })
+
+  it('success state shows "Voice updated from N videos" using response transcriptCount', async () => {
+    const user = userEvent.setup()
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ transcriptCount: 7, lastRegeneratedAt: '2026-06-10T12:00:00.000Z' }),
+    })
+
+    render(
+      <PersonaActionsMenu
+        personaId={1}
+        personaName="Fireship"
+      />
+    )
+
+    const trigger = screen.getByRole('button', { name: /persona actions/i })
+    await user.click(trigger)
+
+    const regenerateItem = screen.getByRole('menuitem', { name: /regenerate persona/i })
+    await user.click(regenerateItem)
+
+    await waitFor(() => {
+      expect(screen.getByText(/Voice updated from 7 videos/i)).toBeInTheDocument()
+    })
+  })
+
+  it('success state aria-live="polite" is present on the success span', async () => {
+    const user = userEvent.setup()
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ transcriptCount: 3, lastRegeneratedAt: null }),
+    })
+
+    render(
+      <PersonaActionsMenu
+        personaId={1}
+        personaName="Fireship"
+      />
+    )
+
+    const trigger = screen.getByRole('button', { name: /persona actions/i })
+    await user.click(trigger)
+
+    const regenerateItem = screen.getByRole('menuitem', { name: /regenerate persona/i })
+    await user.click(regenerateItem)
+
+    await waitFor(() => {
+      const successSpan = screen.getByText(/Voice updated from 3 videos/i)
+      expect(successSpan).toHaveAttribute('aria-live', 'polite')
+    })
+  })
+
+  it('last-updated indicator renders relative time when timestamp is provided', () => {
+    // Two hours ago
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+    render(
+      <PersonaActionsMenu
+        personaId={1}
+        personaName="Fireship"
+        lastRegeneratedAt={twoHoursAgo}
+      />
+    )
+    // Should render something like "last updated 2h ago"
+    expect(screen.getByText(/last updated/i)).toBeInTheDocument()
+    expect(screen.getByText(/ago/i)).toBeInTheDocument()
+  })
+
+  it('last-updated indicator falls back gracefully when timestamp is null - no crash, no false "updated" claim', () => {
+    // Should not throw, and should not render any "last updated" text
+    render(
+      <PersonaActionsMenu
+        personaId={1}
+        personaName="Fireship"
+        lastRegeneratedAt={null}
+      />
+    )
+    expect(screen.queryByText(/last updated/i)).not.toBeInTheDocument()
+  })
+
+  it('shows "Up to date - built from all N transcripts" when not stale', async () => {
+    const user = userEvent.setup()
+    render(
+      <PersonaActionsMenu
+        personaId={1}
+        personaName="Fireship"
+        transcriptCount={12}
+        isStale={false}
+      />
+    )
+    // Open the dropdown to see the menu item
+    const trigger = screen.getByRole('button', { name: /persona actions/i })
+    await user.click(trigger)
+    expect(screen.getByText(/Up to date - built from all 12 transcripts/i)).toBeInTheDocument()
+  })
+
+  it('does not show up-to-date line when stale', async () => {
+    const user = userEvent.setup()
+    render(
+      <PersonaActionsMenu
+        personaId={1}
+        personaName="Fireship"
+        transcriptCount={12}
+        isStale={true}
+      />
+    )
+    const trigger = screen.getByRole('button', { name: /persona actions/i })
+    await user.click(trigger)
+    expect(screen.queryByText(/Up to date/i)).not.toBeInTheDocument()
+  })
+
+  it('does not show up-to-date line when transcriptCount is not provided', async () => {
+    const user = userEvent.setup()
+    render(
+      <PersonaActionsMenu
+        personaId={1}
+        personaName="Fireship"
+        isStale={false}
+      />
+    )
+    const trigger = screen.getByRole('button', { name: /persona actions/i })
+    await user.click(trigger)
+    expect(screen.queryByText(/Up to date/i)).not.toBeInTheDocument()
+  })
+
+  it('force-regenerate item is present and enabled regardless of staleness - not stale', async () => {
+    const user = userEvent.setup()
+    render(
+      <PersonaActionsMenu
+        personaId={1}
+        personaName="Fireship"
+        transcriptCount={12}
+        isStale={false}
+      />
+    )
+    const trigger = screen.getByRole('button', { name: /persona actions/i })
+    await user.click(trigger)
+    const regenItem = screen.getByRole('menuitem', { name: /regenerate persona/i })
+    expect(regenItem).toBeInTheDocument()
+    expect(regenItem).not.toBeDisabled()
+  })
+
+  it('force-regenerate item is present and enabled regardless of staleness - stale', async () => {
+    const user = userEvent.setup()
+    render(
+      <PersonaActionsMenu
+        personaId={1}
+        personaName="Fireship"
+        transcriptCount={12}
+        isStale={true}
+      />
+    )
+    const trigger = screen.getByRole('button', { name: /persona actions/i })
+    await user.click(trigger)
+    const regenItem = screen.getByRole('menuitem', { name: /regenerate persona/i })
+    expect(regenItem).toBeInTheDocument()
+    expect(regenItem).not.toBeDisabled()
+  })
 })

@@ -8,6 +8,7 @@ import { PersonaChatDrawer } from './PersonaChatDrawer'
 import type { Persona } from './ChatHub'
 import { cn } from '@/lib/utils'
 import { usePersonaStatus } from '@/components/providers/PersonaStatusProvider'
+import { STALENESS_THRESHOLD } from './PersonaStatus'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -82,6 +83,21 @@ export function ChatHubDrawer() {
 
   const hasPersonas = personas.length > 0
 
+  // Derive staleness props for the active persona's channel.
+  // Computed here (not inline JSX) for readability.
+  // transcriptCount: the persona's at-generation count (NOT the live count).
+  // isStale: live count - at-gen count >= STALENESS_THRESHOLD.
+  const activeChannel = activePersona
+    ? channels.find((c) => c.channelName === activePersona.channelName)
+    : undefined
+  const personaTranscriptCount = activeChannel?.personaTranscriptCount ?? null
+  const currentTranscriptCount = activeChannel?.transcriptCount ?? 0
+  const stalenessDelta = personaTranscriptCount !== null
+    ? currentTranscriptCount - personaTranscriptCount
+    : 0
+  const activeChannelIsStale =
+    personaTranscriptCount !== null && stalenessDelta >= STALENESS_THRESHOLD
+
   return (
     <>
       {/* FAB — visible when drawer is closed and personas exist */}
@@ -129,6 +145,9 @@ export function ChatHubDrawer() {
               personaName={activePersona.name}
               channelName={activePersona.channelName}
               expertiseTopics={activePersona.expertiseTopics}
+              lastRegeneratedAt={activeChannel?.lastRegeneratedAt ?? null}
+              transcriptCount={personaTranscriptCount !== null ? personaTranscriptCount : undefined}
+              isStale={activeChannelIsStale}
               embedded
               onBack={handleBackToHub}
               onPersonaSwitch={(targetId) => {
