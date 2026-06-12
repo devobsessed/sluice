@@ -26,16 +26,25 @@ export function isChatMessage(entry: ChatEntry): entry is ChatMessage {
   return !isThreadBoundary(entry)
 }
 
-/** Versioned localStorage envelope. */
+/** v2 localStorage envelope - entries only (no facts). */
 export interface ChatStorageV2 {
   version: 2
   entries: ChatEntry[]
 }
 
+/** v3 localStorage envelope - entries + remembered facts. */
+export interface ChatStorageV3 {
+  version: 3
+  entries: ChatEntry[]
+  facts: string[]
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const STORAGE_KEY_PREFIX = 'persona-chat:'
-const CURRENT_VERSION = 2
+
+/** Hard cap on remembered facts per persona. Newest-evicts-oldest when exceeded. */
+export const MAX_FACTS = 5
 
 export function storageKey(personaId: number): string {
   return `${STORAGE_KEY_PREFIX}${personaId}`
@@ -55,13 +64,13 @@ export const historySchema = z.array(historyItemSchema).max(50)
 // ── Migration ─────────────────────────────────────────────────────────────────
 
 /**
- * Migrates v1 data (bare ChatMessage[]) to v2 format.
+ * Migrates v1 data (bare ChatMessage[]) to v3 format.
  * Inserts a thread boundary before old messages so they display
  * as "Earlier messages (no memory)" but are not sent as context.
  */
-function migrateV1ToV2(messages: ChatMessage[]): ChatStorageV2 {
+function migrateV1ToV3(messages: ChatMessage[]): ChatStorageV3 {
   if (messages.length === 0) {
-    return { version: CURRENT_VERSION, entries: [] }
+    return { version: 3, entries: [], facts: [] }
   }
   // Insert boundary before legacy messages
   const boundary: ThreadBoundary = {
@@ -69,8 +78,9 @@ function migrateV1ToV2(messages: ChatMessage[]): ChatStorageV2 {
     timestamp: messages[0]!.timestamp,
   }
   return {
-    version: CURRENT_VERSION,
+    version: 3,
     entries: [boundary, ...messages],
+    facts: [],
   }
 }
 
@@ -78,46 +88,58 @@ function migrateV1ToV2(messages: ChatMessage[]): ChatStorageV2 {
 
 /**
  * Loads and migrates chat data for a persona from localStorage.
- * Returns v2 format regardless of stored version.
+ * Returns v3 format regardless of stored version.
+ * Migration ladder: v1 (bare array) -> v3, v2 ({version:2,entries}) -> v3.
  */
-export function loadChatStorage(personaId: number): ChatStorageV2 {
+export function loadChatStorage(personaId: number): ChatStorageV3 {
   try {
     const raw = localStorage.getItem(storageKey(personaId))
-    if (!raw) return { version: CURRENT_VERSION, entries: [] }
+    if (!raw) return { version: 3, entries: [], facts: [] }
 
     const parsed: unknown = JSON.parse(raw)
 
-    // v2 format: { version: 2, entries: [...] }
-    if (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      'version' in parsed &&
-      (parsed as { version: unknown }).version === 2
-    ) {
-      const data = parsed as ChatStorageV2
-      return data
+    if (typeof parsed === 'object' && parsed !== null && 'version' in parsed) {
+      const versioned = parsed as { version: unknown }
+
+      // v3 format: { version: 3, entries: [...], facts: [...] }
+      if (versioned.version === 3) {
+        return parsed as ChatStorageV3
+      }
+
+      // v2 format: { version: 2, entries: [...] } - migrate to v3
+      if (versioned.version === 2) {
+        const v2 = parsed as ChatStorageV2
+        const migrated: ChatStorageV3 = {
+          version: 3,
+          entries: v2.entries,
+          facts: [],
+        }
+        saveChatStorage(personaId, migrated)
+        return migrated
+      }
     }
 
     // v1 format: bare ChatMessage[] array
     if (Array.isArray(parsed)) {
-      const migrated = migrateV1ToV2(parsed as ChatMessage[])
+      const migrated = migrateV1ToV3(parsed as ChatMessage[])
       // Persist migrated format immediately
       saveChatStorage(personaId, migrated)
       return migrated
     }
 
-    return { version: CURRENT_VERSION, entries: [] }
+    return { version: 3, entries: [], facts: [] }
   } catch {
-    return { version: CURRENT_VERSION, entries: [] }
+    return { version: 3, entries: [], facts: [] }
   }
 }
 
 // ── Save ──────────────────────────────────────────────────────────────────────
 
 /**
- * Persists v2 chat data. Filters out streaming/error messages before saving.
+ * Persists v3 chat data. Filters out streaming/error messages before saving.
+ * Facts are explicitly persisted - they are NOT reconstructed and will not be dropped.
  */
-export function saveChatStorage(personaId: number, data: ChatStorageV2): void {
+export function saveChatStorage(personaId: number, data: ChatStorageV3): void {
   const cleaned: ChatEntry[] = data.entries
     .map((entry) => {
       if (isThreadBoundary(entry)) return entry
@@ -135,7 +157,7 @@ export function saveChatStorage(personaId: number, data: ChatStorageV2): void {
   try {
     localStorage.setItem(
       storageKey(personaId),
-      JSON.stringify({ version: CURRENT_VERSION, entries: cleaned })
+      JSON.stringify({ version: 3, entries: cleaned, facts: data.facts })
     )
   } catch {
     // Ignore quota exceeded
@@ -235,4 +257,68 @@ export function clearChatStorage(personaId: number): void {
   } catch {
     // localStorage unavailable
   }
+}
+
+// ── Fact mutation helpers ─────────────────────────────────────────────────────
+
+/**
+ * Appends new facts to the persona's stored fact list, enforcing the MAX_FACTS
+ * hard cap by evicting the oldest facts first (newest-evicts-oldest).
+ * Saves and returns the updated v3 envelope.
+ */
+export function addFactsToStorage(
+  personaId: number,
+  newFacts: string[]
+): ChatStorageV3 {
+  const storage = loadChatStorage(personaId)
+  const merged = [...storage.facts, ...newFacts]
+  const capped = merged.slice(-MAX_FACTS)
+  const updated: ChatStorageV3 = { ...storage, facts: capped }
+  saveChatStorage(personaId, updated)
+  return updated
+}
+
+/**
+ * Replaces the persona's stored facts with an already-merged set (e.g. the
+ * reconciled result returned by the compress-thread endpoint, which has the
+ * existing facts merged in server-side). Dedupes preserving first occurrence
+ * and applies the MAX_FACTS cap as a backstop. Saves and returns the updated
+ * v3 envelope. Use this - NOT addFactsToStorage - when the input set already
+ * contains the existing facts, or they get double-merged into duplicates.
+ */
+export function replaceFacts(
+  personaId: number,
+  facts: string[]
+): ChatStorageV3 {
+  const storage = loadChatStorage(personaId)
+  const deduped = [...new Set(facts)]
+  const capped = deduped.slice(-MAX_FACTS)
+  const updated: ChatStorageV3 = { ...storage, facts: capped }
+  saveChatStorage(personaId, updated)
+  return updated
+}
+
+/**
+ * Removes a single fact by exact string match.
+ * Saves and returns the updated v3 envelope.
+ */
+export function removeFact(personaId: number, fact: string): ChatStorageV3 {
+  const storage = loadChatStorage(personaId)
+  const updated: ChatStorageV3 = {
+    ...storage,
+    facts: storage.facts.filter((f) => f !== fact),
+  }
+  saveChatStorage(personaId, updated)
+  return updated
+}
+
+/**
+ * Clears all facts for a persona.
+ * Saves and returns the updated v3 envelope.
+ */
+export function clearFacts(personaId: number): ChatStorageV3 {
+  const storage = loadChatStorage(personaId)
+  const updated: ChatStorageV3 = { ...storage, facts: [] }
+  saveChatStorage(personaId, updated)
+  return updated
 }

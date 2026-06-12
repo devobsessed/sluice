@@ -3,16 +3,32 @@ import {
   loadChatStorage,
   saveChatStorage,
   clearChatStorage,
+  replaceFacts,
+  removeFact as removeFact_,
+  clearFacts as clearFacts_,
   isChatMessage,
   isThreadBoundary,
   getContextWindow,
   type ChatMessage,
   type ChatEntry,
-  type ChatStorageV2,
+  type ChatStorageV3,
 } from '@/lib/personas/chat-storage'
 
 export type { ChatMessage, ChatEntry }
 export { isChatMessage, isThreadBoundary }
+
+export interface SourceChunk {
+  chunkId: number
+  content: string
+  videoTitle: string
+  startTime: number | null
+  youtubeId: string | null
+}
+
+export interface HandoffTarget {
+  personaId: number
+  personaName: string
+}
 
 export interface PersonaChatState {
   /** All entries including thread boundaries */
@@ -25,16 +41,34 @@ export interface PersonaChatState {
 
 interface UsePersonaChatReturn {
   state: PersonaChatState
+  /** Transient sources from the latest turn's SSE stream. Null when no message sent yet
+   * or when the current turn has not yet emitted a sources event.
+   * Never persisted to localStorage — resets to null at the start of each sendMessage. */
+  liveSources: SourceChunk[] | null
+  /** Transient handoff target from the latest turn's SSE stream.
+   * Populated when the route detected a better-matching persona.
+   * Cleared at the start of the next sendMessage and on personaId change. */
+  handoff: HandoffTarget | null
+  /** Remembered facts for this persona from previous threads. */
+  facts: string[]
+  /** Set of boundary timestamps that had successful thread compression (transient, session-only).
+   * A boundary with its timestamp in this set renders the memory marker in the drawer;
+   * absence means compression failed or hasn't run yet. */
+  rememberedBoundaries: Set<number>
   sendMessage: (question: string) => Promise<void>
   startNewThread: () => void
   clearHistory: () => void
+  /** Removes a single remembered fact by exact string match. */
+  removeFact: (fact: string) => void
+  /** Clears all remembered facts for this persona. */
+  clearFacts: () => void
 }
 
 /**
- * Derives PersonaChatState from a ChatStorageV2 object plus transient flags.
+ * Derives PersonaChatState from a ChatStorageV3 object plus transient flags.
  */
 function deriveState(
-  storage: ChatStorageV2,
+  storage: ChatStorageV3,
   isStreaming: boolean,
   error: string | null
 ): PersonaChatState {
@@ -53,34 +87,53 @@ function deriveState(
  *
  * SSE format from POST /api/personas/[id]/query:
  *   data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"..."}}
+ *   data: {"type":"handoff","personaId":2,"personaName":"Other Creator"}
  *   data: {"type":"done"}
  *
- * Uses versioned localStorage schema (v2) via chat-storage module.
- * v1 bare arrays are automatically migrated to v2 on first load.
+ * Uses versioned localStorage schema (v3) via chat-storage module.
+ * v1/v2 data is automatically migrated to v3 on first load.
  *
  * State shape:
  * - `entries` — all ChatEntry items (messages + thread boundaries)
  * - `messages` — derived: only ChatMessage entries (backward-compat)
- * - `startNewThread()` — inserts a ThreadBoundary, resets context window
- * - `sendMessage()` — sends history from active context window in POST body
+ * - `handoff` — transient: set when stream emits a handoff event; cleared on next send/persona change
+ * - `facts` — remembered user facts for this persona (persisted per-persona in localStorage)
+ * - `rememberedBoundaries` — transient Set of boundary timestamps with successful compression
+ * - `startNewThread()` — inserts a ThreadBoundary, resets context window, fires compression
+ * - `sendMessage()` — sends history + facts from active context window in POST body
  *
  * @param personaId - The persona to chat with
+ * @param _channelName - Retained for API stability; the compress-thread endpoint
+ *   derives the channel server-side from the persona row (client input not trusted)
  */
-export function usePersonaChat(personaId: number): UsePersonaChatReturn {
-  const [storage, setStorage] = useState<ChatStorageV2>(() =>
+export function usePersonaChat(personaId: number, _channelName: string): UsePersonaChatReturn {
+  const [storage, setStorage] = useState<ChatStorageV3>(() =>
     loadChatStorage(personaId)
   )
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [liveSources, setLiveSources] = useState<SourceChunk[] | null>(null)
+  const [handoff, setHandoff] = useState<HandoffTarget | null>(null)
+  // Transient set of boundary timestamps that received successful compression this session
+  const [rememberedBoundaries, setRememberedBoundaries] = useState<Set<number>>(
+    () => new Set<number>()
+  )
 
   const abortControllerRef = useRef<AbortController | null>(null)
+  // Mirrors the personaId prop so detached async callbacks (background thread
+  // compression) can detect a persona switch and skip stale state updates.
+  const personaIdRef = useRef(personaId)
 
-  // Reload storage when personaId changes; abort any in-flight request
+  // Reload storage when personaId changes; abort any in-flight request; clear transient state
   useEffect(() => {
+    personaIdRef.current = personaId
     abortControllerRef.current?.abort()
     setStorage(loadChatStorage(personaId))
     setIsStreaming(false)
     setError(null)
+    setLiveSources(null)
+    setHandoff(null)
+    setRememberedBoundaries(new Set<number>())
   }, [personaId])
 
   // Abort any in-flight request on unmount
@@ -98,11 +151,14 @@ export function usePersonaChat(personaId: number): UsePersonaChatReturn {
       const controller = new AbortController()
       abortControllerRef.current = controller
 
-      // Capture the context window BEFORE appending the new message
-      // so the new question is not included in its own history
-      const history = getContextWindow(
-        loadChatStorage(personaId).entries
-      )
+      // Reset transient sources and handoff at the start of each message — never persisted
+      setLiveSources(null)
+      setHandoff(null)
+
+      // Capture the current storage (including facts) BEFORE appending the new message
+      const currentStorage = loadChatStorage(personaId)
+      const history = getContextWindow(currentStorage.entries)
+      const facts = currentStorage.facts
 
       const newMessage: ChatMessage = {
         question,
@@ -114,8 +170,8 @@ export function usePersonaChat(personaId: number): UsePersonaChatReturn {
 
       // Append the new message (streaming placeholder) and set global state
       setStorage((prev) => {
-        const updated: ChatStorageV2 = {
-          version: 2,
+        const updated: ChatStorageV3 = {
+          ...prev,
           entries: [...prev.entries, newMessage],
         }
         return updated
@@ -127,7 +183,7 @@ export function usePersonaChat(personaId: number): UsePersonaChatReturn {
         const response = await fetch(`/api/personas/${personaId}/query`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question, history }),
+          body: JSON.stringify({ question, history, facts }),
           signal: controller.signal,
         })
 
@@ -204,6 +260,19 @@ export function usePersonaChat(personaId: number): UsePersonaChatReturn {
                     })
                   }
                 }
+              } else if (typedEvent['type'] === 'sources') {
+                // Capture transient sources for the live turn — never persisted to localStorage
+                const rawChunks = typedEvent['chunks']
+                if (Array.isArray(rawChunks)) {
+                  setLiveSources(rawChunks as SourceChunk[])
+                }
+              } else if (typedEvent['type'] === 'handoff') {
+                // Capture transient handoff target — cleared on next sendMessage / persona change
+                const personaIdVal = typedEvent['personaId']
+                const personaNameVal = typedEvent['personaName']
+                if (typeof personaIdVal === 'number' && typeof personaNameVal === 'string') {
+                  setHandoff({ personaId: personaIdVal, personaName: personaNameVal })
+                }
               } else if (typedEvent['type'] === 'done') {
                 // Finalize the message and persist to localStorage
                 setStorage((prev) => {
@@ -212,12 +281,13 @@ export function usePersonaChat(personaId: number): UsePersonaChatReturn {
                       ? { ...entry, isStreaming: false }
                       : entry
                   )
-                  const updated: ChatStorageV2 = { version: 2, entries }
+                  const updated: ChatStorageV3 = { ...prev, entries }
                   saveChatStorage(personaId, updated)
                   return updated
                 })
                 setIsStreaming(false)
               }
+              // Unknown event types: silently ignored (no case needed — they fall through)
             }
           }
         } finally {
@@ -253,29 +323,119 @@ export function usePersonaChat(personaId: number): UsePersonaChatReturn {
   )
 
   const startNewThread = useCallback(() => {
+    // Never insert a boundary mid-stream: the delta/done handlers target the
+    // last entry, and a boundary there would orphan the streaming message.
+    if (isStreaming) return
+
+    // Capture the closing thread's context window BEFORE inserting the boundary.
+    // The compression prompt needs the conversation that's ending.
+    const closingStorage = loadChatStorage(personaId)
+    const closingThread = getContextWindow(closingStorage.entries)
+    const existingFacts = closingStorage.facts
+
     const boundary = {
       type: 'thread-boundary' as const,
       timestamp: Date.now(),
     }
+    const boundaryTimestamp = boundary.timestamp
+
+    // Insert boundary and save SYNCHRONOUSLY — compression never blocks this
     setStorage((prev) => {
-      const updated: ChatStorageV2 = {
-        version: 2,
+      const updated: ChatStorageV3 = {
+        ...prev,
         entries: [...prev.entries, boundary],
       }
       saveChatStorage(personaId, updated)
       return updated
     })
-  }, [personaId])
+
+    // Fire compression in the background — never awaited, never blocks the boundary insert.
+    // Distillation runs server-side (the model client can't live in the browser);
+    // this endpoint is stateless compute — facts persist only in localStorage here.
+    void (async () => {
+      let newFacts: string[]
+      try {
+        const response = await fetch(`/api/personas/${personaId}/compress-thread`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ thread: closingThread, existingFacts }),
+        })
+        if (!response.ok) {
+          // Failure path: leave facts untouched, no marker (absence = failure signal)
+          return
+        }
+        const data: { facts?: unknown } = await response.json()
+        if (!Array.isArray(data.facts)) return
+        newFacts = data.facts.filter((f): f is string => typeof f === 'string')
+      } catch {
+        // Network/parse failure: leave facts untouched, no marker
+        return
+      }
+
+      // Compression succeeded when the server returned a different fact set.
+      // Compare by content: distillFacts returns existingFacts unchanged (same content)
+      // on failure / empty output; a different set means compression was productive.
+      const compressionSucceeded =
+        JSON.stringify(newFacts) !== JSON.stringify(existingFacts)
+
+      if (!compressionSucceeded) {
+        // Failure path: leave facts untouched, no marker (absence = failure signal)
+        return
+      }
+
+      // Write new facts to storage and update hook state.
+      // REPLACE, don't append: the server's distillFacts already merged
+      // existingFacts in - appending would double-merge into duplicates.
+      // replaceFacts writes to THIS persona's localStorage key, which stays
+      // correct even after a switch - but the in-memory state below belongs to
+      // whichever persona is active now, so skip it if the persona changed.
+      const updated = replaceFacts(personaId, newFacts)
+      if (personaIdRef.current !== personaId) return
+      setStorage(updated)
+
+      // Signal the marker: add this boundary's timestamp to the remembered set
+      setRememberedBoundaries((prev) => {
+        const next = new Set(prev)
+        next.add(boundaryTimestamp)
+        return next
+      })
+    })()
+  }, [personaId, isStreaming])
 
   const clearHistory = useCallback(() => {
     clearChatStorage(personaId)
-    setStorage({ version: 2, entries: [] })
+    setStorage({ version: 3, entries: [], facts: [] })
     setIsStreaming(false)
     setError(null)
   }, [personaId])
 
+  const removeFact = useCallback(
+    (fact: string) => {
+      const updated = removeFact_(personaId, fact)
+      setStorage(updated)
+    },
+    [personaId]
+  )
+
+  const clearFacts = useCallback(() => {
+    const updated = clearFacts_(personaId)
+    setStorage(updated)
+  }, [personaId])
+
   // Derive state from split state pieces
   const state = deriveState(storage, isStreaming, error)
+  const facts = storage.facts
 
-  return { state, sendMessage, startNewThread, clearHistory }
+  return {
+    state,
+    liveSources,
+    handoff,
+    facts,
+    rememberedBoundaries,
+    sendMessage,
+    startNewThread,
+    clearHistory,
+    removeFact,
+    clearFacts,
+  }
 }

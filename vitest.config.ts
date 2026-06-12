@@ -7,9 +7,42 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
-    include: ['**/*.test.{ts,tsx}'],
-    exclude: ['node_modules', '.next'],
     setupFiles: ['dotenv/config', './vitest.setup.ts'],
+    // Tests that hit the real goldminer_test Postgres DB share mutable state:
+    // every setupTestDb() TRUNCATEs all tables, so parallel workers wipe each
+    // other's rows mid-test (flaky route.race.test.ts A1). DB-bound files run
+    // sequentially in their own project; everything else stays parallel.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'db',
+          fileParallelism: false,
+          exclude: ['node_modules', '.next'],
+          include: [
+            'src/app/api/auth/**/route.race.test.ts',
+            'src/lib/auth/__tests__/refresh-dedupe.test.ts',
+            'src/lib/db/__tests__/access-requests.test.ts',
+            'src/lib/db/__tests__/schema.test.ts',
+          ],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'unit',
+          include: ['**/*.test.{ts,tsx}'],
+          exclude: [
+            'node_modules',
+            '.next',
+            'src/app/api/auth/**/route.race.test.ts',
+            'src/lib/auth/__tests__/refresh-dedupe.test.ts',
+            'src/lib/db/__tests__/access-requests.test.ts',
+            'src/lib/db/__tests__/schema.test.ts',
+          ],
+        },
+      },
+    ],
   },
   resolve: {
     alias: {

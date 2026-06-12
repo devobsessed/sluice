@@ -1,4 +1,4 @@
-import { ilike, eq, sql } from 'drizzle-orm';
+import { and, ilike, eq, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { db as defaultDb, chunks, videos } from '@/lib/db';
 import type * as schema from '@/lib/db/schema';
@@ -36,14 +36,21 @@ async function generateEmbeddingWithRetry(text: string): Promise<Float32Array | 
  * @param query - Text query to search for
  * @param limit - Maximum number of results to return (default: 20)
  * @param db - Database instance (optional, defaults to singleton)
+ * @param channel - Optional exact-match channel name filter. When provided, restricts
+ *   results to chunks whose video.channel matches exactly. When omitted or null/empty,
+ *   behavior is identical to today's global search.
  * @returns Array of search results with similarity score of 1.0
  */
 async function keywordSearch(
   query: string,
   limit = 20,
-  db: NodePgDatabase<typeof schema> = defaultDb
+  db: NodePgDatabase<typeof schema> = defaultDb,
+  channel?: string | null,
 ): Promise<SearchResult[]> {
   const pattern = `%${query}%`;
+  const whereCondition = channel
+    ? and(ilike(chunks.content, pattern), eq(videos.channel, channel))
+    : ilike(chunks.content, pattern);
 
   const results = await db
     .select({
@@ -61,7 +68,7 @@ async function keywordSearch(
     })
     .from(chunks)
     .innerJoin(videos, eq(chunks.videoId, videos.id))
-    .where(ilike(chunks.content, pattern))
+    .where(whereCondition)
     .limit(limit);
 
   // Ensure similarity is a number (SQL literal returns string)
@@ -90,20 +97,31 @@ function reciprocalRankFusion(
   keywordResults: SearchResult[],
   k = 60
 ): SearchResult[] {
-  const scores = new Map<number, { result: SearchResult; score: number }>();
+  const scores = new Map<
+    number,
+    { result: SearchResult; score: number; vectorSimilarity?: number }
+  >();
 
-  // Score from vector results
+  // Score from vector results — preserve the raw cosine similarity before the
+  // RRF score overwrites `similarity`. Evidence consumers (persona
+  // weak-retrieval guard) need cosine, not rank arithmetic.
   vectorResults.forEach((result, rank) => {
     const existing = scores.get(result.chunkId);
     const rrfScore = 1 / (k + rank + 1);
     if (existing) {
       existing.score += rrfScore;
+      existing.vectorSimilarity = result.similarity;
     } else {
-      scores.set(result.chunkId, { result, score: rrfScore });
+      scores.set(result.chunkId, {
+        result,
+        score: rrfScore,
+        vectorSimilarity: result.similarity,
+      });
     }
   });
 
-  // Score from keyword results
+  // Score from keyword results — keyword-only chunks carry no cosine evidence
+  // (their `similarity` is the 1.0 literal), so vectorSimilarity stays unset.
   keywordResults.forEach((result, rank) => {
     const existing = scores.get(result.chunkId);
     const rrfScore = 1 / (k + rank + 1);
@@ -117,7 +135,11 @@ function reciprocalRankFusion(
   // Sort by combined score and update similarity to RRF score
   return Array.from(scores.values())
     .sort((a, b) => b.score - a.score)
-    .map(({ result, score }) => ({ ...result, similarity: score }));
+    .map(({ result, score, vectorSimilarity }) => ({
+      ...result,
+      similarity: score,
+      vectorSimilarity,
+    }));
 }
 
 /**
@@ -171,6 +193,7 @@ export async function hybridSearch(
     limit?: number;
     temporalDecay?: boolean;
     halfLifeDays?: number;
+    channel?: string;
   } = {},
   db: NodePgDatabase<typeof schema> = defaultDb
 ): Promise<{ results: SearchResult[]; degraded: boolean }> {
@@ -179,6 +202,7 @@ export async function hybridSearch(
     limit = 10,
     temporalDecay = false,
     halfLifeDays = 365,
+    channel,
   } = options;
 
   let results: SearchResult[];
@@ -186,17 +210,20 @@ export async function hybridSearch(
 
   // Pure keyword mode — no embedding needed
   if (mode === 'keyword') {
-    results = await keywordSearch(query, limit, db);
+    results = await keywordSearch(query, limit, db, channel);
   }
   // Pure vector mode
   else if (mode === 'vector') {
     const embedding = await generateEmbeddingWithRetry(query)
     if (embedding) {
       const embeddingArray = Array.from(embedding)
-      results = await vectorSearch(embeddingArray, limit, 0.3, db)
+      const vectorResults = await vectorSearch(embeddingArray, limit, 0.3, db, channel)
+      // In pure vector mode `similarity` IS the cosine — mirror it so evidence
+      // consumers can rely on vectorSimilarity in every mode.
+      results = vectorResults.map((r) => ({ ...r, vectorSimilarity: r.similarity }))
     } else {
       // Embedding failed — fall back to keyword search
-      results = await keywordSearch(query, limit, db)
+      results = await keywordSearch(query, limit, db, channel)
       degraded = true
     }
   }
@@ -207,14 +234,14 @@ export async function hybridSearch(
       const embeddingArray = Array.from(embedding)
       // Fetch more results (limit * 2) from each method for better fusion
       const [vectorResults, keywordResults] = await Promise.all([
-        vectorSearch(embeddingArray, limit * 2, 0.3, db),
-        keywordSearch(query, limit * 2, db),
+        vectorSearch(embeddingArray, limit * 2, 0.3, db, channel),
+        keywordSearch(query, limit * 2, db, channel),
       ])
       // Apply RRF and take top results
       results = reciprocalRankFusion(vectorResults, keywordResults).slice(0, limit)
     } else {
       // Embedding failed — fall back to keyword-only
-      results = await keywordSearch(query, limit, db)
+      results = await keywordSearch(query, limit, db, channel)
       degraded = true
     }
   }

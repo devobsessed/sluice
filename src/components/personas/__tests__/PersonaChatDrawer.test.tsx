@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { PersonaChatDrawer } from '../PersonaChatDrawer'
-import type { PersonaChatState } from '@/hooks/usePersonaChat'
+import type { PersonaChatState, HandoffTarget } from '@/hooks/usePersonaChat'
 
 // Mutable state object so individual tests can modify it
 let mockState: PersonaChatState = {
@@ -12,16 +12,28 @@ let mockState: PersonaChatState = {
   error: null,
 }
 
+let mockHandoff: HandoffTarget | null = null
+let mockFacts: string[] = []
+let mockRememberedBoundaries: Set<number> = new Set()
+
 const mockSendMessage = vi.fn()
 const mockClearHistory = vi.fn()
 const mockStartNewThread = vi.fn()
+const mockRemoveFact = vi.fn()
+const mockClearFacts = vi.fn()
 
 vi.mock('@/hooks/usePersonaChat', () => ({
   usePersonaChat: () => ({
     state: mockState,
+    liveSources: null,
+    handoff: mockHandoff,
+    facts: mockFacts,
+    rememberedBoundaries: mockRememberedBoundaries,
     sendMessage: mockSendMessage,
     clearHistory: mockClearHistory,
     startNewThread: mockStartNewThread,
+    removeFact: mockRemoveFact,
+    clearFacts: mockClearFacts,
   }),
   isThreadBoundary: (entry: { type?: string }) =>
     'type' in entry && entry.type === 'thread-boundary',
@@ -34,10 +46,11 @@ const defaultProps = {
   onOpenChange: vi.fn(),
   personaId: 1,
   personaName: 'Fireship',
+  channelName: 'Fireship',
   expertiseTopics: ['React', 'TypeScript', 'Next.js', 'Svelte'],
 }
 
-function renderDrawer(props = {}) {
+function renderDrawer(props: Partial<typeof defaultProps & { onPersonaSwitch?: (id: number, name: string, question: string) => void }> = {}) {
   return render(<PersonaChatDrawer {...defaultProps} {...props} />)
 }
 
@@ -49,9 +62,14 @@ describe('PersonaChatDrawer', () => {
       isStreaming: false,
       error: null,
     }
+    mockHandoff = null
+    mockFacts = []
+    mockRememberedBoundaries = new Set()
     mockSendMessage.mockClear()
     mockClearHistory.mockClear()
     mockStartNewThread.mockClear()
+    mockRemoveFact.mockClear()
+    mockClearFacts.mockClear()
   })
 
   it('renders persona name in header', () => {
@@ -560,5 +578,276 @@ describe('PersonaChatDrawer', () => {
     renderDrawer()
     const input = screen.getByPlaceholderText('Ask Fireship anything...')
     expect(input).toHaveClass('text-base')
+  })
+
+  // ── Handoff chip tests ────────────────────────────────────────────────────────
+
+  describe('handoff chip', () => {
+    it('FIRST: chip click calls onPersonaSwitch with target persona and question, then auto-sends after remount', async () => {
+      const user = userEvent.setup()
+      const onPersonaSwitch = vi.fn()
+
+      const messages = [
+        {
+          question: 'Tell me about Rust',
+          answer: 'That is outside what I cover.',
+          timestamp: 1000000,
+          isStreaming: false,
+          isError: false,
+        },
+      ]
+      mockState = {
+        entries: messages,
+        messages,
+        isStreaming: false,
+        error: null,
+      }
+      mockHandoff = { personaId: 2, personaName: 'Jon Gjengset' }
+
+      renderDrawer({ onPersonaSwitch })
+
+      const chip = screen.getByRole('button', { name: /ask jon gjengset instead/i })
+      await user.click(chip)
+
+      expect(onPersonaSwitch).toHaveBeenCalledWith(2, 'Jon Gjengset', 'Tell me about Rust')
+    })
+
+    it('chip renders only when handoff state is set', () => {
+      const messages = [
+        {
+          question: 'What is React?',
+          answer: 'React is a UI library.',
+          timestamp: 1000000,
+          isStreaming: false,
+          isError: false,
+        },
+      ]
+      mockState = {
+        entries: messages,
+        messages,
+        isStreaming: false,
+        error: null,
+      }
+      // handoff is null by default
+      renderDrawer()
+      expect(screen.queryByRole('button', { name: /ask .* instead/i })).not.toBeInTheDocument()
+    })
+
+    it('chip renders with handoff persona name when handoff is set', () => {
+      const messages = [
+        {
+          question: 'Tell me about Rust',
+          answer: 'That is outside what I cover.',
+          timestamp: 1000000,
+          isStreaming: false,
+          isError: false,
+        },
+      ]
+      mockState = {
+        entries: messages,
+        messages,
+        isStreaming: false,
+        error: null,
+      }
+      mockHandoff = { personaId: 3, personaName: 'ThePrimeagen' }
+
+      renderDrawer({ onPersonaSwitch: vi.fn() })
+
+      expect(screen.getByRole('button', { name: /ask theprimeagen instead/i })).toBeInTheDocument()
+    })
+
+    it('chip does NOT render when no onPersonaSwitch handler is wired', () => {
+      // Without a switch handler, a click could only strand the chip in a
+      // permanent loading state - so the chip must not render at all.
+      const messages = [
+        {
+          question: 'Tell me about Rust',
+          answer: 'That is outside what I cover.',
+          timestamp: 1000000,
+          isStreaming: false,
+          isError: false,
+        },
+      ]
+      mockState = {
+        entries: messages,
+        messages,
+        isStreaming: false,
+        error: null,
+      }
+      mockHandoff = { personaId: 3, personaName: 'ThePrimeagen' }
+
+      renderDrawer()
+
+      expect(screen.queryByRole('button', { name: /ask theprimeagen instead/i })).not.toBeInTheDocument()
+    })
+  })
+
+  // ── Memory marker tests ───────────────────────────────────────────────────────
+
+  describe('boundary memory marker', () => {
+    it('boundary with successful compression renders "will remember" marker', () => {
+      const BOUNDARY_TS = 1001000
+      const msg1 = {
+        question: 'Old question?',
+        answer: 'Old answer.',
+        timestamp: 1000000,
+        isStreaming: false,
+        isError: false,
+      }
+      const boundary = { type: 'thread-boundary' as const, timestamp: BOUNDARY_TS }
+      const msg2 = {
+        question: 'New question?',
+        answer: 'New answer.',
+        timestamp: 1002000,
+        isStreaming: false,
+        isError: false,
+      }
+      mockState = {
+        entries: [msg1, boundary, msg2],
+        messages: [msg1, msg2],
+        isStreaming: false,
+        error: null,
+      }
+      mockRememberedBoundaries = new Set([BOUNDARY_TS])
+
+      renderDrawer()
+
+      expect(screen.getByText(/fireship will remember/i)).toBeInTheDocument()
+    })
+
+    it('boundary without compression renders plain "New thread" divider (failure = no marker)', () => {
+      const msg1 = {
+        question: 'Old question?',
+        answer: 'Old answer.',
+        timestamp: 1000000,
+        isStreaming: false,
+        isError: false,
+      }
+      const boundary = { type: 'thread-boundary' as const, timestamp: 1001000 }
+      const msg2 = {
+        question: 'New question?',
+        answer: 'New answer.',
+        timestamp: 1002000,
+        isStreaming: false,
+        isError: false,
+      }
+      mockState = {
+        entries: [msg1, boundary, msg2],
+        messages: [msg1, msg2],
+        isStreaming: false,
+        error: null,
+      }
+      // rememberedBoundaries is empty - no compression succeeded
+      mockRememberedBoundaries = new Set()
+
+      renderDrawer()
+
+      expect(screen.queryByText(/will remember/i)).not.toBeInTheDocument()
+      expect(screen.getByText('New thread')).toBeInTheDocument()
+    })
+  })
+
+  // ── "What I remember" facts viewer tests ──────────────────────────────────────
+
+  describe('"What I remember" facts viewer', () => {
+    it('shows "What I remember" menu item when menu is opened', async () => {
+      const user = userEvent.setup()
+      renderDrawer()
+
+      const menuTrigger = screen.getByRole('button', { name: /persona actions/i })
+      await user.click(menuTrigger)
+
+      await waitFor(() => {
+        expect(screen.getByRole('menuitem', { name: /what i remember/i })).toBeInTheDocument()
+      })
+    })
+
+    it('clicking "What I remember" opens inline facts list with empty state', async () => {
+      const user = userEvent.setup()
+      mockFacts = []
+      renderDrawer()
+
+      const menuTrigger = screen.getByRole('button', { name: /persona actions/i })
+      await user.click(menuTrigger)
+
+      await waitFor(() => {
+        expect(screen.getByRole('menuitem', { name: /what i remember/i })).toBeInTheDocument()
+      })
+
+      await user.click(screen.getByRole('menuitem', { name: /what i remember/i }))
+
+      await waitFor(() => {
+        expect(screen.getByText(/nothing yet/i)).toBeInTheDocument()
+      })
+    })
+
+    it('lists remembered facts with per-fact remove buttons', async () => {
+      const user = userEvent.setup()
+      mockFacts = ['uses TypeScript', 'prefers Drizzle']
+      renderDrawer()
+
+      const menuTrigger = screen.getByRole('button', { name: /persona actions/i })
+      await user.click(menuTrigger)
+
+      await waitFor(() => {
+        expect(screen.getByRole('menuitem', { name: /what i remember/i })).toBeInTheDocument()
+      })
+
+      await user.click(screen.getByRole('menuitem', { name: /what i remember/i }))
+
+      await waitFor(() => {
+        expect(screen.getByText('uses TypeScript')).toBeInTheDocument()
+        expect(screen.getByText('prefers Drizzle')).toBeInTheDocument()
+      })
+    })
+
+    it('calls removeFact when remove button clicked', async () => {
+      const user = userEvent.setup()
+      mockFacts = ['uses TypeScript', 'prefers Drizzle']
+      renderDrawer()
+
+      const menuTrigger = screen.getByRole('button', { name: /persona actions/i })
+      await user.click(menuTrigger)
+
+      await waitFor(() => {
+        expect(screen.getByRole('menuitem', { name: /what i remember/i })).toBeInTheDocument()
+      })
+
+      await user.click(screen.getByRole('menuitem', { name: /what i remember/i }))
+
+      await waitFor(() => {
+        expect(screen.getByText('uses TypeScript')).toBeInTheDocument()
+      })
+
+      // Remove the first fact
+      const removeButtons = screen.getAllByRole('button', { name: /remove fact/i })
+      await user.click(removeButtons[0]!)
+
+      expect(mockRemoveFact).toHaveBeenCalledWith('uses TypeScript')
+    })
+
+    it('calls clearFacts when clear-all button clicked', async () => {
+      const user = userEvent.setup()
+      mockFacts = ['uses TypeScript', 'prefers Drizzle']
+      renderDrawer()
+
+      const menuTrigger = screen.getByRole('button', { name: /persona actions/i })
+      await user.click(menuTrigger)
+
+      await waitFor(() => {
+        expect(screen.getByRole('menuitem', { name: /what i remember/i })).toBeInTheDocument()
+      })
+
+      await user.click(screen.getByRole('menuitem', { name: /what i remember/i }))
+
+      await waitFor(() => {
+        expect(screen.getByText('uses TypeScript')).toBeInTheDocument()
+      })
+
+      const clearAllButton = screen.getByRole('button', { name: /clear all/i })
+      await user.click(clearAllButton)
+
+      expect(mockClearFacts).toHaveBeenCalledOnce()
+    })
   })
 })

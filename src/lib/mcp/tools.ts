@@ -8,6 +8,7 @@ import { getPersonaContext, formatContextForPrompt } from '@/lib/personas/contex
 import { findBestPersonas } from '@/lib/personas/ensemble'
 import { getExtractionForVideo } from '@/lib/db/insights'
 import { generateText } from '@/lib/claude/client'
+import { buildSystemParamForMcp } from '@/lib/personas/streaming'
 
 /**
  * Register the search_rag tool with the MCP server.
@@ -31,16 +32,40 @@ export function registerSearchRag(server: McpServer): void {
       },
     },
     async ({ topic, creator, limit }) => {
-      // Perform hybrid search
-      const { results } = await hybridSearch(topic, { limit: limit ?? 10 })
+      let searchResults: Awaited<ReturnType<typeof hybridSearch>>['results']
 
-      // Filter by creator if provided (case-insensitive)
-      const filtered = creator
-        ? results.filter(r => r.channel?.toLowerCase().includes(creator.toLowerCase()))
-        : results
+      if (creator) {
+        // Resolve the fuzzy creator string to an exact channel name. Prefer an exact
+        // case-insensitive match so a fully-typed name never routes to a more popular
+        // superstring channel (channels are ordered by video count); fall back to
+        // case-insensitive substring match, preserving today's fuzzy ergonomics while
+        // moving the filter inside the query legs (before RRF fusion) so small
+        // channels are no longer starved.
+        const channels = await getDistinctChannels()
+        const normalizedCreator = creator.trim().toLowerCase()
+        const resolvedChannel =
+          channels.find(c => c.channel.toLowerCase() === normalizedCreator)?.channel ??
+          channels.find(c => c.channel.toLowerCase().includes(normalizedCreator))?.channel
+
+        if (!resolvedChannel) {
+          // No channel matched - return empty rather than falling back to global search,
+          // matching the observable behavior of the old post-filter on an unmatched creator.
+          const videos = aggregateByVideo([])
+          return {
+            content: [{ type: 'text', text: JSON.stringify(videos, null, 2) }],
+          }
+        }
+
+        const { results } = await hybridSearch(topic, { limit: limit ?? 10, channel: resolvedChannel })
+        searchResults = results
+      } else {
+        // No creator: global search unchanged
+        const { results } = await hybridSearch(topic, { limit: limit ?? 10 })
+        searchResults = results
+      }
 
       // Aggregate results by video
-      const videos = aggregateByVideo(filtered)
+      const videos = aggregateByVideo(searchResults)
 
       // Enrich with knowledge prompts from insights
       const enrichedVideos = await Promise.all(
@@ -124,14 +149,21 @@ async function queryPersona(
   const context = await getPersonaContext(persona.channelName, question)
   const formattedContext = formatContextForPrompt(context)
 
-  // Build system prompt
-  let systemPrompt = persona.systemPrompt
-  if (formattedContext) {
-    systemPrompt += '\n\nContext from your content:\n' + formattedContext
-    systemPrompt += '\n\nAnswer based on your content and expertise.'
-  }
+  // Build v2 system param using the shared guard helper.
+  // buildSystemParamForMcp applies the zero-retrieval guard (and weak-retrieval
+  // soft signal) but NEVER adds ask-back permission - one-shot tool calls need
+  // answers, not questions. It also emits the [persona-guard] log line so the
+  // guard is observable at run time.
+  const system = buildSystemParamForMcp(persona, context)
 
-  const prompt = systemPrompt + '\n\n' + question
+  // Serialize system + context + question into a single string for generateText
+  // (generateText is single-string, mirroring the local-serialization in streamMessages).
+  let prompt = system
+  if (formattedContext) {
+    prompt += '\n\n<context>\n' + formattedContext + '\n</context>'
+  }
+  prompt += '\n\n' + question
+
   const text = await generateText(prompt)
 
   const sources = context.slice(0, 5).map(c => ({

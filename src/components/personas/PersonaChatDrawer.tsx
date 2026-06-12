@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Send, ArrowLeft, Trash2, AlertCircle, RotateCcw } from 'lucide-react'
+import { Send, ArrowLeft, Trash2, AlertCircle, RotateCcw, ArrowRight } from 'lucide-react'
 import {
   Sheet,
   SheetContent,
@@ -15,7 +15,10 @@ import {
   usePersonaChat,
   isThreadBoundary,
   isChatMessage,
+  type SourceChunk,
 } from '@/hooks/usePersonaChat'
+import { SourceCitation } from './SourceCitation'
+import { PersonaActionsMenu } from './PersonaActionsMenu'
 import { cn } from '@/lib/utils'
 
 interface PersonaChatDrawerProps {
@@ -23,11 +26,20 @@ interface PersonaChatDrawerProps {
   onOpenChange: (open: boolean) => void
   personaId: number
   personaName: string
+  /** The YouTube channel name for this persona, used for domain-anchored thread compression. */
+  channelName: string
   expertiseTopics?: string[]
   /** When true, renders content directly without a Sheet wrapper (used inside ChatHubDrawer) */
   embedded?: boolean
   /** Called when back arrow is clicked in embedded mode */
   onBack?: () => void
+  /**
+   * Called when the user clicks the handoff chip to switch to a different persona.
+   * The parent (ChatHubDrawer) is responsible for wiring this to its persona-setter state.
+   * carryQuestion is the original question from the last message, auto-sent to the new persona.
+   * Return false to signal the switch was refused (resets the chip's loading state).
+   */
+  onPersonaSwitch?: (personaId: number, personaName: string, carryQuestion: string) => boolean | void
 }
 
 interface PersonaAvatarProps {
@@ -57,19 +69,158 @@ function formatTimestamp(ts: number): string {
   }).format(new Date(ts))
 }
 
+/**
+ * Splits answer text into segments: plain text and [n] citation markers.
+ * Returns an array of { type: 'text' | 'citation', value: string, index: number }.
+ */
+interface TextSegment {
+  type: 'text'
+  value: string
+}
+interface CitationSegment {
+  type: 'citation'
+  n: number
+}
+type AnswerSegment = TextSegment | CitationSegment
+
+function parseAnswerSegments(text: string): AnswerSegment[] {
+  const CITATION_RE = /\[(\d+)\]/g
+  const segments: AnswerSegment[] = []
+  let lastIdx = 0
+  let match: RegExpExecArray | null
+
+  while ((match = CITATION_RE.exec(text)) !== null) {
+    if (match.index > lastIdx) {
+      segments.push({ type: 'text', value: text.slice(lastIdx, match.index) })
+    }
+    segments.push({ type: 'citation', n: parseInt(match[1]!, 10) })
+    lastIdx = match.index + match[0].length
+  }
+
+  if (lastIdx < text.length) {
+    segments.push({ type: 'text', value: text.slice(lastIdx) })
+  }
+
+  return segments
+}
+
+interface AnswerTextProps {
+  text: string
+  isStreaming?: boolean
+  liveSources: SourceChunk[] | null
+  onCitationClick: (n: number) => void
+}
+
+/**
+ * Renders the answer text, parsing [n] markers into:
+ * - Clickable affordances when liveSources is present (live turn)
+ * - De-emphasized non-clickable text when liveSources is null (historical)
+ * Out-of-range [n] markers are rendered as de-emphasized text (clamped away).
+ */
+function AnswerText({ text, isStreaming, liveSources, onCitationClick }: AnswerTextProps) {
+  const paragraphs = text.split('\n\n')
+
+  return (
+    <div className="space-y-2">
+      {paragraphs.map((paragraph, pIdx, arr) => {
+        const segments = parseAnswerSegments(paragraph)
+        const isLast = pIdx === arr.length - 1
+
+        // Check if this paragraph actually has citation markers
+        const hasParagraphCitations = segments.some((s) => s.type === 'citation')
+
+        if (!hasParagraphCitations) {
+          // No citations in this paragraph - render plain text directly in <p>
+          // so existing tests asserting tagName === 'P' stay green
+          return (
+            <p key={pIdx}>
+              {paragraph}
+              {isStreaming && isLast && (
+                <span className="motion-safe:animate-pulse">▌</span>
+              )}
+            </p>
+          )
+        }
+
+        return (
+          <p key={pIdx}>
+            {segments.map((seg, sIdx) => {
+              if (seg.type === 'text') {
+                return <span key={sIdx}>{seg.value}</span>
+              }
+
+              // Citation segment
+              const n = seg.n
+              const sourceIndex = n - 1 // 0-based
+              const isInRange = liveSources != null && sourceIndex >= 0 && sourceIndex < liveSources.length
+
+              if (liveSources != null && isInRange) {
+                // Live turn: clickable affordance
+                return (
+                  <button
+                    key={sIdx}
+                    type="button"
+                    onClick={() => onCitationClick(sourceIndex)}
+                    aria-label={`[${n}]`}
+                    className="inline text-primary text-xs font-mono hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-primary rounded-sm px-0.5"
+                  >
+                    [{n}]
+                  </button>
+                )
+              }
+
+              // Historical or out-of-range: de-emphasized non-clickable text
+              return (
+                <span
+                  key={sIdx}
+                  className="text-xs font-mono text-muted-foreground/50"
+                >
+                  [{n}]
+                </span>
+              )
+            })}
+            {isStreaming && isLast && (
+              <span className="motion-safe:animate-pulse">▌</span>
+            )}
+          </p>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * Returns true if the given answer text contains any [n] citation markers.
+ */
+function hasCitations(text: string): boolean {
+  return /\[\d+\]/.test(text)
+}
+
 export function PersonaChatDrawer({
   open,
   onOpenChange,
   personaId,
   personaName,
+  channelName,
   expertiseTopics,
   embedded = false,
   onBack,
+  onPersonaSwitch,
 }: PersonaChatDrawerProps) {
-  const { state, sendMessage, clearHistory, startNewThread } = usePersonaChat(personaId)
+  const { state, liveSources, handoff, facts, rememberedBoundaries, sendMessage, clearHistory, startNewThread, removeFact, clearFacts } = usePersonaChat(personaId, channelName)
   const [inputValue, setInputValue] = useState('')
   const threadRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  // Which source index to highlight in the SourceCitation list
+  const [highlightIndex, setHighlightIndex] = useState<number | undefined>(undefined)
+  // Track which message index is the "live" one (the last non-historical message)
+  const lastMessageIdx = state.entries.length - 1
+  // Pending question to auto-send after a persona switch remount.
+  // Stored as a ref so it survives the personaId change that resets the hook,
+  // without needing to drive re-renders.
+  const pendingQuestionRef = useRef<string | null>(null)
+  // Whether the handoff chip is in loading state (while persona switch is pending)
+  const [handoffLoading, setHandoffLoading] = useState(false)
 
   const topicLabel =
     expertiseTopics && expertiseTopics.length > 0
@@ -110,6 +261,18 @@ export function PersonaChatDrawer({
     }
   }, [open])
 
+  // Fire the pending question once after a persona-switch remount settles.
+  // The ref is set in the chip click handler before onPersonaSwitch is called,
+  // so it persists across the personaId change that remounts the hook.
+  useEffect(() => {
+    const question = pendingQuestionRef.current
+    if (!question) return
+    pendingQuestionRef.current = null
+    setHandoffLoading(false)
+    void sendMessage(question)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [personaId])
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     const trimmed = inputValue.trim()
@@ -133,6 +296,34 @@ export function PersonaChatDrawer({
 
   function handleRetry(question: string) {
     void sendMessage(question)
+  }
+
+  function handleCitationClick(sourceIndex: number) {
+    // Clear first so a repeat click on the same [n] marker still registers as a
+    // prop change in SourceCitation (it detects highlights by prop diffing).
+    setHighlightIndex(undefined)
+    requestAnimationFrame(() => {
+      setHighlightIndex(sourceIndex)
+    })
+  }
+
+  function handleHandoffChipClick() {
+    if (!handoff || !onPersonaSwitch) return
+    // The last message's question is the question to carry over
+    const lastMessage = state.messages[state.messages.length - 1]
+    const carryQuestion = lastMessage?.question ?? ''
+
+    // Set loading shimmer while the switch is in flight
+    setHandoffLoading(true)
+    // Stash the question in a ref so it survives the persona-switch remount
+    pendingQuestionRef.current = carryQuestion
+    // Notify the parent to switch to the handoff persona
+    const accepted = onPersonaSwitch(handoff.personaId, handoff.personaName, carryQuestion)
+    if (accepted === false) {
+      // Parent refused the switch (e.g. persona record unavailable) - undo the shimmer
+      pendingQuestionRef.current = null
+      setHandoffLoading(false)
+    }
   }
 
   const hasMessages = state.messages.length > 0
@@ -181,6 +372,7 @@ export function PersonaChatDrawer({
             variant="ghost"
             size="icon-xs"
             onClick={startNewThread}
+            disabled={state.isStreaming}
             aria-label="New thread"
             className="shrink-0 text-muted-foreground hover:text-foreground"
           >
@@ -200,6 +392,15 @@ export function PersonaChatDrawer({
             <Trash2 />
           </Button>
         )}
+
+        {/* Persona-level actions menu (always visible, extensible) */}
+        <PersonaActionsMenu
+          personaId={personaId}
+          personaName={personaName}
+          facts={facts}
+          onRemoveFact={removeFact}
+          onClearFacts={clearFacts}
+        />
       </SheetHeader>
 
       {/* Message Thread */}
@@ -218,16 +419,74 @@ export function PersonaChatDrawer({
         {state.entries.map((entry, idx) => {
           if (isThreadBoundary(entry)) {
             // Thread boundary divider
-            const label = idx === 0 ? 'Earlier messages (no memory)' : 'New thread'
+            // idx === 0 is the sentinel "Earlier messages" boundary (pre-existing data before chat)
+            if (idx === 0) {
+              return (
+                <div
+                  key={`boundary-${idx}`}
+                  className="flex items-center gap-2 my-1"
+                  role="separator"
+                  aria-label="Earlier messages (no memory)"
+                >
+                  <div className="flex-1 border-t border-dashed border-muted-foreground/30" />
+                  <span className="text-[11px] text-muted-foreground/60 shrink-0">Earlier messages (no memory)</span>
+                  <div className="flex-1 border-t border-dashed border-muted-foreground/30" />
+                </div>
+              )
+            }
+
+            // Non-first boundary: check if compression succeeded for this timestamp
+            const boundaryTs = entry.timestamp
+            const hasMemory = rememberedBoundaries.has(boundaryTs)
+
+            if (hasMemory) {
+              // Memory marker: "Persona will remember" with facts
+              // Facts are the current facts from the hook (compression was successful)
+              return (
+                <div
+                  key={`boundary-${idx}`}
+                  className="flex flex-col gap-1.5 my-1"
+                  role="separator"
+                  aria-label="Memory marker"
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 border-t border-dashed border-muted-foreground/30" />
+                    <span className="flex items-center gap-1.5 text-[11px] text-primary shrink-0">
+                      <span
+                        className="size-1.5 rounded-full bg-primary shrink-0"
+                        aria-hidden="true"
+                      />
+                      {personaName} will remember
+                    </span>
+                    <div className="flex-1 border-t border-dashed border-muted-foreground/30" />
+                  </div>
+                  {facts.length > 0 && (
+                    <ul className="pl-4 flex flex-col gap-0.5 list-none">
+                      {facts.map((fact, fIdx) => (
+                        <li
+                          key={fIdx}
+                          className="text-[13px] text-muted-foreground motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200"
+                          style={{ animationDelay: `${fIdx * 40}ms` }}
+                        >
+                          - {fact}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )
+            }
+
+            // No compression: plain "New thread" divider
             return (
               <div
                 key={`boundary-${idx}`}
                 className="flex items-center gap-2 my-1"
                 role="separator"
-                aria-label={label}
+                aria-label="New thread"
               >
                 <div className="flex-1 border-t border-dashed border-muted-foreground/30" />
-                <span className="text-[11px] text-muted-foreground/60 shrink-0">{label}</span>
+                <span className="text-[11px] text-muted-foreground/60 shrink-0">New thread</span>
                 <div className="flex-1 border-t border-dashed border-muted-foreground/30" />
               </div>
             )
@@ -237,6 +496,22 @@ export function PersonaChatDrawer({
 
           const msg = entry
           const isDimmed = lastBoundaryIdx !== -1 && idx < lastBoundaryIdx
+          // The last message entry is the "live" one when liveSources is present
+          const isLiveMessage = idx === lastMessageIdx && liveSources != null
+          // Show handoff chip under the last message when a handoff target is available
+          const isLastEntry = idx === lastMessageIdx
+          // Chip requires a wired switch handler - without one a click could only strand
+          // the chip in a permanent loading state.
+          const showHandoffChip =
+            isLastEntry &&
+            handoff !== null &&
+            onPersonaSwitch != null &&
+            !msg.isStreaming &&
+            !msg.isError
+
+          // Determine if this message has [n] markers we can show sources for
+          const messageHasCitations = hasCitations(msg.answer)
+          const showSourceCitation = isLiveMessage && messageHasCitations
 
           return (
             <div
@@ -261,7 +536,7 @@ export function PersonaChatDrawer({
               {/* Persona answer bubble */}
               <div className="flex items-end gap-2">
                 <PersonaAvatar name={personaName} className="size-6 text-xs" />
-                <div className="max-w-[80%] px-4 py-2 rounded-2xl rounded-bl-md bg-muted text-sm">
+                <div className="max-w-[80%] flex-1 px-4 py-2 rounded-2xl rounded-bl-md bg-muted text-sm">
                   {msg.isError ? (
                     <span className="flex items-center gap-1.5 text-destructive">
                       <AlertCircle className="size-4 shrink-0" />
@@ -272,27 +547,70 @@ export function PersonaChatDrawer({
                     <div className="flex flex-col gap-1.5 py-0.5">
                       <div
                         data-testid="streaming-skeleton"
-                        className="h-3 w-32 rounded bg-muted-foreground/20 animate-pulse"
+                        className="h-3 w-32 rounded bg-muted-foreground/20 motion-safe:animate-pulse"
                       />
                       <div
                         data-testid="streaming-skeleton"
-                        className="h-3 w-24 rounded bg-muted-foreground/20 animate-pulse"
+                        className="h-3 w-24 rounded bg-muted-foreground/20 motion-safe:animate-pulse"
                       />
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      {msg.answer.split('\n\n').map((paragraph, pIdx, arr) => (
-                        <p key={pIdx}>
-                          {paragraph}
-                          {msg.isStreaming && pIdx === arr.length - 1 && (
-                            <span className="motion-safe:animate-pulse">▌</span>
-                          )}
-                        </p>
-                      ))}
-                    </div>
+                    <AnswerText
+                      text={msg.answer}
+                      isStreaming={msg.isStreaming}
+                      liveSources={isLiveMessage ? liveSources : null}
+                      onCitationClick={handleCitationClick}
+                    />
                   )}
                 </div>
               </div>
+
+              {/* SourceCitation list — only for the live turn that has citations */}
+              {showSourceCitation && (
+                <div className="ml-8">
+                  <SourceCitation
+                    sources={liveSources}
+                    highlightIndex={highlightIndex}
+                    forceOpen={false}
+                  />
+                </div>
+              )}
+
+              {/* Handoff chip — rendered under the last persona message when a better match exists */}
+              {showHandoffChip && handoff && (
+                <div className="ml-8">
+                  <button
+                    type="button"
+                    onClick={handleHandoffChipClick}
+                    disabled={handoffLoading}
+                    aria-label={`Ask ${handoff.personaName} instead`}
+                    className={cn(
+                      'group flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium',
+                      'bg-emerald-100 text-emerald-700',
+                      'motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-200 motion-safe:ease-out',
+                      'transition-colors',
+                      handoffLoading
+                        ? 'opacity-60 motion-safe:animate-pulse cursor-not-allowed'
+                        : 'hover:bg-emerald-200 cursor-pointer'
+                    )}
+                  >
+                    {/* Green dot — pulses once on arrival */}
+                    <span
+                      className="size-2 rounded-full bg-primary shrink-0 motion-safe:animate-ping motion-safe:[animation-iteration-count:1]"
+                      aria-hidden="true"
+                    />
+                    <span>
+                      Ask {handoff.personaName} instead
+                      {!handoffLoading && (
+                        <ArrowRight
+                          className="inline ml-1 size-3.5 transition-transform group-hover:translate-x-0.5"
+                          aria-hidden="true"
+                        />
+                      )}
+                    </span>
+                  </button>
+                </div>
+              )}
             </div>
           )
         })}

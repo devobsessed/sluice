@@ -232,7 +232,7 @@ describe('GET /api/cron/check-feeds', () => {
     vi.mocked(createVideoFromRSS).mockResolvedValueOnce(101).mockResolvedValueOnce(102)
 
     // Mock workflow start
-    vi.mocked(start).mockResolvedValue('run-id-123')
+    vi.mocked(start).mockResolvedValue('run-id-123' as never)
 
     const response = await GET(request)
 
@@ -328,7 +328,7 @@ describe('GET /api/cron/check-feeds', () => {
     ])
 
     vi.mocked(createVideoFromRSS).mockResolvedValue(103)
-    vi.mocked(start).mockResolvedValue('run-id-456')
+    vi.mocked(start).mockResolvedValue('run-id-456' as never)
 
     const response = await GET(request)
 
@@ -411,7 +411,7 @@ describe('GET /api/cron/check-feeds', () => {
 
     // First workflow dispatch fails, second succeeds
     vi.mocked(start).mockRejectedValueOnce(new Error('Workflow dispatch failed'))
-    vi.mocked(start).mockResolvedValueOnce('run-id-success')
+    vi.mocked(start).mockResolvedValueOnce('run-id-success' as never)
 
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 

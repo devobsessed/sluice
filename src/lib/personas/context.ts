@@ -4,32 +4,29 @@ import type { SearchResult } from '@/lib/search/types'
 /**
  * Fetches relevant context chunks for a persona query, scoped to the creator's channel.
  *
- * Uses hybrid search (vector + keyword) to find the most relevant content,
- * then filters results to only include chunks from the specified channel.
+ * Uses hybrid search (vector + keyword) with an exact-match channel filter so the query
+ * competes only within the creator's content - not the global knowledge bank. This ensures
+ * small channels with fewer chunks surface relevant content instead of being drowned out.
  *
  * @param channelName - Name of the YouTube channel to scope context to
  * @param question - User's question to find relevant context for
- * @returns Array of up to 10 relevant chunks from the channel
+ * @returns Array of up to 15 relevant chunks from the channel
  */
 export async function getPersonaContext(
   channelName: string,
   question: string
 ): Promise<SearchResult[]> {
-  // Fetch more results than we need since we'll filter by channel
-  // Destructure results from the new return shape; degraded flag not needed here —
-  // keyword-only fallback results are still useful context for the persona.
-  const { results: searchResults } = await hybridSearch(question, {
+  // Scoped channel search - the channel filter is applied inside both query legs
+  // (vector + keyword) before RRF fusion, so small-channel content is never starved
+  // by global competition. Degraded flag not needed here - keyword-only fallback
+  // results are still useful context for the persona.
+  const { results } = await hybridSearch(question, {
     mode: 'hybrid',
-    limit: 50, // Fetch extra to ensure we get 10 from the target channel
+    limit: 15,
+    channel: channelName,
   })
 
-  // Filter to only include results from the target channel
-  const filteredResults = searchResults.filter(
-    (result) => result.channel === channelName
-  )
-
-  // Return top 10 results
-  return filteredResults.slice(0, 10)
+  return results
 }
 
 /**

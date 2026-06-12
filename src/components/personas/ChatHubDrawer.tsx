@@ -127,9 +127,20 @@ export function ChatHubDrawer() {
               }}
               personaId={activePersona.id}
               personaName={activePersona.name}
+              channelName={activePersona.channelName}
               expertiseTopics={activePersona.expertiseTopics}
               embedded
               onBack={handleBackToHub}
+              onPersonaSwitch={(targetId) => {
+                // Only switch when the full persona record is available - synthesizing
+                // channelName from the display name breaks channel-scoped retrieval
+                // and compression for the switched persona (names can diverge).
+                const found = personas.find((p) => p.id === targetId)
+                if (!found) return false
+                // Switch to the new persona — the drawer's pending-question effect fires the auto-send
+                setActivePersona(found)
+                return true
+              }}
             />
           )}
         </SheetContent>

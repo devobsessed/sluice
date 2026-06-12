@@ -1,6 +1,3 @@
-/** Minimum video count before suggesting a persona for a channel */
-export const PERSONA_THRESHOLD = 5
-
 import { eq, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { db as database, videos, chunks, personas } from '@/lib/db'
@@ -8,6 +5,15 @@ import type * as schema from '@/lib/db/schema'
 import type { Persona } from '@/lib/db/schema'
 import { computeChannelCentroid } from '@/lib/channels/similarity'
 import { generateText } from '@/lib/claude/client'
+
+/** Minimum video count before suggesting a persona for a channel */
+export const PERSONA_THRESHOLD = 5
+
+/** Maximum number of transcript videos to sample for persona generation */
+const PERSONA_TRANSCRIPT_SAMPLE_LIMIT = 20
+
+/** Maximum combined transcript character length to send to Claude */
+const PERSONA_TRANSCRIPT_CHAR_LIMIT = 30000
 
 /**
  * Generates a persona system prompt by analyzing the creator's content.
@@ -24,7 +30,7 @@ export async function generatePersonaSystemPrompt(
   channelName: string,
   db: NodePgDatabase<typeof schema> = database
 ): Promise<string> {
-  // Fetch sample transcripts (limit to 5 for analysis)
+  // Fetch sample transcripts - up to 20 videos for richer persona analysis
   const transcriptSamples = await db
     .select({
       transcript: videos.transcript,
@@ -33,28 +39,34 @@ export async function generatePersonaSystemPrompt(
     .where(
       sql`${videos.channel} = ${channelName} AND ${videos.transcript} IS NOT NULL`
     )
-    .limit(5)
+    .limit(PERSONA_TRANSCRIPT_SAMPLE_LIMIT)
 
   if (transcriptSamples.length === 0) {
     throw new Error('No transcripts found for channel')
   }
 
-  // Combine samples for analysis
+  // Combine samples for analysis, capped at ~30k chars to fit context window
   const combinedTranscripts = transcriptSamples
     .map((s) => s.transcript)
     .filter(Boolean)
     .join('\n\n---\n\n')
+    .slice(0, PERSONA_TRANSCRIPT_CHAR_LIMIT)
 
-  // Build prompt for Claude to analyze content
-  const analysisPrompt = `Analyze the following video transcripts from the YouTube creator "${channelName}" and generate a system prompt that captures their expertise, teaching style, and tone.
+  // Build v2 prompt: request a rich persona document with real opinions and voice
+  const analysisPrompt = `Analyze the following video transcripts from the YouTube creator "${channelName}" and write a persona document that will guide an AI to speak authentically as this creator.
 
 Transcripts:
-${combinedTranscripts.slice(0, 5000)} ${combinedTranscripts.length > 5000 ? '...' : ''}
+${combinedTranscripts}
 
-Generate a system prompt in this format:
-"You are [creator name]. Your expertise is in [key topics]. You speak in a [style description] way. Answer questions based on your content from your YouTube channel."
+Write a plain-prose persona document covering ALL of the following:
 
-Keep it concise (2-3 sentences) and focus on their unique voice and expertise.`
+1. Voice and tone: How do they sound? What makes their delivery distinctive?
+2. Recurring opinions and takes: What positions do they hold consistently? What are their signature beliefs about their field?
+3. Pet peeves: What mistakes, habits, or misconceptions do they call out repeatedly?
+4. How they handle basic questions: Do they give direct answers, reframe the question, add nuance, or redirect to fundamentals?
+5. Questioning style (Socratic vs lecture): Do they tend to ask questions back to make the viewer think, or do they explain and teach directly?
+
+Write in second person ("You are..."). Be specific and concrete - use phrases and stances that actually appear in the content above. Avoid generic filler.`
 
   try {
     const generatedPrompt = await generateText(analysisPrompt)
@@ -70,6 +82,52 @@ Keep it concise (2-3 sentences) and focus on their unique voice and expertise.`
     }
     throw new Error('Unknown error during system prompt generation')
   }
+}
+
+/**
+ * Regenerates the v2 persona system prompt for an existing persona and
+ * updates the row in place.
+ *
+ * Preserves `id`, `expertiseEmbedding`, `expertiseTopics`, and `transcriptCount`
+ * so localStorage chat history (keyed by personaId) remains valid.
+ *
+ * @param channelName - Name of the channel whose persona to update
+ * @param db - Database instance (defaults to singleton)
+ * @returns The updated persona row
+ * @throws Error if the channel has no transcripts or no existing persona row
+ */
+export async function regeneratePersonaSystemPrompt(
+  channelName: string,
+  db: NodePgDatabase<typeof schema> = database
+): Promise<Persona> {
+  // Confirm the persona row exists BEFORE paying for generation (transcript
+  // query + Claude call) - and so a missing row fails with the documented
+  // 'No persona found' error instead of 'No transcripts found'.
+  const [existing] = await db
+    .select()
+    .from(personas)
+    .where(eq(personas.channelName, channelName))
+    .limit(1)
+
+  if (!existing) {
+    throw new Error(`No persona found for channel "${channelName}"`)
+  }
+
+  // Regenerate the system prompt using the v2 builder
+  const systemPrompt = await generatePersonaSystemPrompt(channelName, db)
+
+  // UPDATE in place - never insert; preserves id so localStorage history stays attached
+  const [updated] = await db
+    .update(personas)
+    .set({ systemPrompt })
+    .where(eq(personas.channelName, channelName))
+    .returning()
+
+  if (!updated) {
+    throw new Error(`No persona found for channel "${channelName}"`)
+  }
+
+  return updated
 }
 
 /**
