@@ -37,8 +37,9 @@ interface PersonaChatDrawerProps {
    * Called when the user clicks the handoff chip to switch to a different persona.
    * The parent (ChatHubDrawer) is responsible for wiring this to its persona-setter state.
    * carryQuestion is the original question from the last message, auto-sent to the new persona.
+   * Return false to signal the switch was refused (resets the chip's loading state).
    */
-  onPersonaSwitch?: (personaId: number, personaName: string, carryQuestion: string) => void
+  onPersonaSwitch?: (personaId: number, personaName: string, carryQuestion: string) => boolean | void
 }
 
 interface PersonaAvatarProps {
@@ -298,11 +299,16 @@ export function PersonaChatDrawer({
   }
 
   function handleCitationClick(sourceIndex: number) {
-    setHighlightIndex(sourceIndex)
+    // Clear first so a repeat click on the same [n] marker still registers as a
+    // prop change in SourceCitation (it detects highlights by prop diffing).
+    setHighlightIndex(undefined)
+    requestAnimationFrame(() => {
+      setHighlightIndex(sourceIndex)
+    })
   }
 
   function handleHandoffChipClick() {
-    if (!handoff) return
+    if (!handoff || !onPersonaSwitch) return
     // The last message's question is the question to carry over
     const lastMessage = state.messages[state.messages.length - 1]
     const carryQuestion = lastMessage?.question ?? ''
@@ -312,7 +318,12 @@ export function PersonaChatDrawer({
     // Stash the question in a ref so it survives the persona-switch remount
     pendingQuestionRef.current = carryQuestion
     // Notify the parent to switch to the handoff persona
-    onPersonaSwitch?.(handoff.personaId, handoff.personaName, carryQuestion)
+    const accepted = onPersonaSwitch(handoff.personaId, handoff.personaName, carryQuestion)
+    if (accepted === false) {
+      // Parent refused the switch (e.g. persona record unavailable) - undo the shimmer
+      pendingQuestionRef.current = null
+      setHandoffLoading(false)
+    }
   }
 
   const hasMessages = state.messages.length > 0
@@ -361,6 +372,7 @@ export function PersonaChatDrawer({
             variant="ghost"
             size="icon-xs"
             onClick={startNewThread}
+            disabled={state.isStreaming}
             aria-label="New thread"
             className="shrink-0 text-muted-foreground hover:text-foreground"
           >
@@ -488,7 +500,14 @@ export function PersonaChatDrawer({
           const isLiveMessage = idx === lastMessageIdx && liveSources != null
           // Show handoff chip under the last message when a handoff target is available
           const isLastEntry = idx === lastMessageIdx
-          const showHandoffChip = isLastEntry && handoff !== null && !msg.isStreaming && !msg.isError
+          // Chip requires a wired switch handler - without one a click could only strand
+          // the chip in a permanent loading state.
+          const showHandoffChip =
+            isLastEntry &&
+            handoff !== null &&
+            onPersonaSwitch != null &&
+            !msg.isStreaming &&
+            !msg.isError
 
           // Determine if this message has [n] markers we can show sources for
           const messageHasCitations = hasCitations(msg.answer)

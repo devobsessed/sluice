@@ -369,16 +369,19 @@ describe('distillFacts - edge cases', () => {
     vi.clearAllMocks()
   })
 
-  it('handles empty thread by still calling generateTextFast', async () => {
-    mockGenerateTextFast.mockResolvedValue('exploring TypeScript')
+  it('short-circuits empty threads without calling the model', async () => {
+    // No conversation = nothing to distill. Calling the model anyway would
+    // fabricate facts from the channel name alone, persisted via replaceFacts.
+    const existingFacts = ['prefers TypeScript']
 
-    await distillFacts({
+    const result = await distillFacts({
       thread: [],
-      existingFacts: [],
+      existingFacts,
       channelName: 'ThePrimeagen',
     })
 
-    expect(mockGenerateTextFast).toHaveBeenCalledOnce()
+    expect(mockGenerateTextFast).not.toHaveBeenCalled()
+    expect(result).toEqual(existingFacts)
   })
 
   it('handles single-line model response without bullet or number', async () => {

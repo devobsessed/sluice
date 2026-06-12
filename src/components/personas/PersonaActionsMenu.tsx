@@ -196,9 +196,8 @@ export function PersonaActionsMenu({
                     variant="ghost"
                     size="icon-xs"
                     onClick={() => onRemoveFact?.(fact)}
-                    className="size-5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                    className="size-5 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
                     aria-label={`Remove fact`}
-                    tabIndex={0}
                   >
                     <Trash2 className="size-3" />
                   </Button>

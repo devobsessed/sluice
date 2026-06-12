@@ -131,17 +131,15 @@ export function ChatHubDrawer() {
               expertiseTopics={activePersona.expertiseTopics}
               embedded
               onBack={handleBackToHub}
-              onPersonaSwitch={(targetId, targetName) => {
-                // Find the full persona object for the handoff target; fall back to minimal shape
+              onPersonaSwitch={(targetId) => {
+                // Only switch when the full persona record is available - synthesizing
+                // channelName from the display name breaks channel-scoped retrieval
+                // and compression for the switched persona (names can diverge).
                 const found = personas.find((p) => p.id === targetId)
-                const nextPersona: Persona = found ?? {
-                  id: targetId,
-                  name: targetName,
-                  channelName: targetName,
-                  expertiseTopics: [],
-                }
+                if (!found) return false
                 // Switch to the new persona — the drawer's pending-question effect fires the auto-send
-                setActivePersona(nextPersona)
+                setActivePersona(found)
+                return true
               }}
             />
           )}

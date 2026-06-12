@@ -120,9 +120,13 @@ export function usePersonaChat(personaId: number, _channelName: string): UsePers
   )
 
   const abortControllerRef = useRef<AbortController | null>(null)
+  // Mirrors the personaId prop so detached async callbacks (background thread
+  // compression) can detect a persona switch and skip stale state updates.
+  const personaIdRef = useRef(personaId)
 
   // Reload storage when personaId changes; abort any in-flight request; clear transient state
   useEffect(() => {
+    personaIdRef.current = personaId
     abortControllerRef.current?.abort()
     setStorage(loadChatStorage(personaId))
     setIsStreaming(false)
@@ -319,6 +323,10 @@ export function usePersonaChat(personaId: number, _channelName: string): UsePers
   )
 
   const startNewThread = useCallback(() => {
+    // Never insert a boundary mid-stream: the delta/done handlers target the
+    // last entry, and a boundary there would orphan the streaming message.
+    if (isStreaming) return
+
     // Capture the closing thread's context window BEFORE inserting the boundary.
     // The compression prompt needs the conversation that's ending.
     const closingStorage = loadChatStorage(personaId)
@@ -378,7 +386,11 @@ export function usePersonaChat(personaId: number, _channelName: string): UsePers
       // Write new facts to storage and update hook state.
       // REPLACE, don't append: the server's distillFacts already merged
       // existingFacts in - appending would double-merge into duplicates.
+      // replaceFacts writes to THIS persona's localStorage key, which stays
+      // correct even after a switch - but the in-memory state below belongs to
+      // whichever persona is active now, so skip it if the persona changed.
       const updated = replaceFacts(personaId, newFacts)
+      if (personaIdRef.current !== personaId) return
       setStorage(updated)
 
       // Signal the marker: add this boundary's timestamp to the remembered set
@@ -388,7 +400,7 @@ export function usePersonaChat(personaId: number, _channelName: string): UsePers
         return next
       })
     })()
-  }, [personaId])
+  }, [personaId, isStreaming])
 
   const clearHistory = useCallback(() => {
     clearChatStorage(personaId)

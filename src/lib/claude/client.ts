@@ -143,13 +143,14 @@ export async function generateTextFast(
   }
 
   // A promise that resolves null after timeoutMs and fires the abort.
+  let timer: ReturnType<typeof setTimeout> | null = null
   const timeoutPromise = new Promise<null>(resolve => {
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       controller.abort()
       resolve(null)
     }, timeoutMs)
     // If the internal signal aborts before the timer fires, clear it to avoid leaking.
-    signal.addEventListener('abort', () => clearTimeout(timer), { once: true })
+    signal.addEventListener('abort', () => clearTimeout(timer!), { once: true })
   })
 
   const callPromise = (async (): Promise<string | null> => {
@@ -203,7 +204,13 @@ export async function generateTextFast(
     }
   })()
 
-  return Promise.race([callPromise, timeoutPromise, abortPromise])
+  try {
+    return await Promise.race([callPromise, timeoutPromise, abortPromise])
+  } finally {
+    // Successful completion never aborts, so the timer would otherwise stay
+    // live until timeoutMs - clear it to avoid keeping request workers alive.
+    if (timer) clearTimeout(timer)
+  }
 }
 
 /**

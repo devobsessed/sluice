@@ -106,6 +106,13 @@ export interface DistillFactsParams {
 export async function distillFacts(params: DistillFactsParams): Promise<string[]> {
   const { thread, existingFacts, channelName, signal } = params
 
+  // Empty thread: nothing to distill. Short-circuit before invoking the model -
+  // asked for 3-5 facts with no conversation, it would fabricate them from the
+  // channel name alone, and those would persist via replaceFacts upstream.
+  if (thread.length === 0) {
+    return existingFacts
+  }
+
   const prompt = buildDistillationPrompt({ thread, existingFacts, channelName })
 
   const raw = await generateTextFast(prompt, {

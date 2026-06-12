@@ -651,9 +651,34 @@ describe('PersonaChatDrawer', () => {
       }
       mockHandoff = { personaId: 3, personaName: 'ThePrimeagen' }
 
-      renderDrawer()
+      renderDrawer({ onPersonaSwitch: vi.fn() })
 
       expect(screen.getByRole('button', { name: /ask theprimeagen instead/i })).toBeInTheDocument()
+    })
+
+    it('chip does NOT render when no onPersonaSwitch handler is wired', () => {
+      // Without a switch handler, a click could only strand the chip in a
+      // permanent loading state - so the chip must not render at all.
+      const messages = [
+        {
+          question: 'Tell me about Rust',
+          answer: 'That is outside what I cover.',
+          timestamp: 1000000,
+          isStreaming: false,
+          isError: false,
+        },
+      ]
+      mockState = {
+        entries: messages,
+        messages,
+        isStreaming: false,
+        error: null,
+      }
+      mockHandoff = { personaId: 3, personaName: 'ThePrimeagen' }
+
+      renderDrawer()
+
+      expect(screen.queryByRole('button', { name: /ask theprimeagen instead/i })).not.toBeInTheDocument()
     })
   })
 

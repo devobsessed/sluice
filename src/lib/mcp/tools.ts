@@ -35,13 +35,17 @@ export function registerSearchRag(server: McpServer): void {
       let searchResults: Awaited<ReturnType<typeof hybridSearch>>['results']
 
       if (creator) {
-        // Resolve the fuzzy creator string to an exact channel name via case-insensitive
-        // substring match. This preserves today's fuzzy ergonomics while moving the filter
-        // inside the query legs (before RRF fusion) so small channels are no longer starved.
+        // Resolve the fuzzy creator string to an exact channel name. Prefer an exact
+        // case-insensitive match so a fully-typed name never routes to a more popular
+        // superstring channel (channels are ordered by video count); fall back to
+        // case-insensitive substring match, preserving today's fuzzy ergonomics while
+        // moving the filter inside the query legs (before RRF fusion) so small
+        // channels are no longer starved.
         const channels = await getDistinctChannels()
-        const resolvedChannel = channels.find(
-          c => c.channel.toLowerCase().includes(creator.toLowerCase())
-        )?.channel
+        const normalizedCreator = creator.trim().toLowerCase()
+        const resolvedChannel =
+          channels.find(c => c.channel.toLowerCase() === normalizedCreator)?.channel ??
+          channels.find(c => c.channel.toLowerCase().includes(normalizedCreator))?.channel
 
         if (!resolvedChannel) {
           // No channel matched - return empty rather than falling back to global search,

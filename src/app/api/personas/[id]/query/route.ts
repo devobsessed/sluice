@@ -11,7 +11,7 @@ import { requireSession } from '@/lib/auth-guards'
 import { historySchema } from '@/lib/personas/chat-storage'
 
 const querySchema = z.object({
-  question: z.string().min(1, 'Question is required'),
+  question: z.string().trim().min(1, 'Question is required'),
   history: historySchema.optional(),
   /** Remembered facts about the user from previous threads (max 5, newest-evicts-oldest) */
   facts: z.array(z.string()).max(5).optional(),
@@ -115,11 +115,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (handoffResults.length > 0) {
       const topResult = handoffResults[0]!
       const currentResult = handoffResults.find(r => r.persona.id === personaId)
-      const currentScore = currentResult?.score ?? 0
 
+      // Skip handoff when the current persona was never scored (no expertiseEmbedding):
+      // a fabricated 0 baseline would emit a handoff to any persona scoring >= margin.
       if (
+        currentResult &&
         topResult.persona.id !== personaId &&
-        topResult.score - currentScore >= HANDOFF_MARGIN
+        topResult.score - currentResult.score >= HANDOFF_MARGIN
       ) {
         handoff = {
           personaId: topResult.persona.id,

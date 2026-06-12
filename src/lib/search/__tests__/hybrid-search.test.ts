@@ -45,6 +45,20 @@ const createMockDb = () => {
 
 type MockDb = ReturnType<typeof createMockDb>
 
+/**
+ * Recursively collects primitive string values from a drizzle SQL object graph
+ * (cycle-safe). Lets tests assert a where() predicate actually carries a bound
+ * channel param - `where` being called proves nothing, since keyword search
+ * always has an ILIKE where clause even without channel scoping.
+ */
+const collectBoundStrings = (value: unknown, seen = new Set<object>()): string[] => {
+  if (typeof value === 'string') return [value]
+  if (value === null || typeof value !== 'object') return []
+  if (seen.has(value)) return []
+  seen.add(value)
+  return Object.values(value).flatMap((v) => collectBoundStrings(v, seen))
+}
+
 describe('hybridSearch', () => {
   let mockDb: MockDb
 
@@ -1013,8 +1027,11 @@ describe('hybridSearch', () => {
       expect(results).toHaveLength(1)
       expect(results[0]?.channel).toBe('Tiny Creator')
 
-      // where() must have been called (channel filter ANDed in)
+      // The where() predicate must carry the channel as a bound param -
+      // keyword search always calls where() (ILIKE), so presence alone proves nothing
       expect(mockDb._selectChain.where).toHaveBeenCalled()
+      const keywordWhereArg = mockDb._selectChain.where.mock.calls[0]![0]
+      expect(collectBoundStrings(keywordWhereArg)).toContain('Tiny Creator')
     })
 
     it('channel filter applied in hybrid mode before fusion - both legs receive channel', async () => {
@@ -1065,8 +1082,10 @@ describe('hybridSearch', () => {
       expect(vsCall).toBeDefined()
       expect(vsCall![4]).toBe('Niche Creator')
 
-      // Keyword leg: where() must have been called (AND'd with channel)
+      // Keyword leg: the where() predicate must carry the channel as a bound param
       expect(mockDb._selectChain.where).toHaveBeenCalled()
+      const hybridWhereArg = mockDb._selectChain.where.mock.calls[0]![0]
+      expect(collectBoundStrings(hybridWhereArg)).toContain('Niche Creator')
     })
 
     it('fusion preserves raw cosine as vectorSimilarity; similarity becomes the RRF score (matrix regression)', async () => {
@@ -1161,8 +1180,10 @@ describe('hybridSearch', () => {
       // vectorSearch must NOT have been called (embedding failed before vector leg)
       expect(vectorSearch).not.toHaveBeenCalled()
 
-      // keyword where() must have been called (channel filter preserved in fallback)
+      // keyword where() predicate must carry the channel (filter preserved in fallback)
       expect(mockDb._selectChain.where).toHaveBeenCalled()
+      const fallbackWhereArg = mockDb._selectChain.where.mock.calls[0]![0]
+      expect(collectBoundStrings(fallbackWhereArg)).toContain('Scoped Creator')
     })
   })
 

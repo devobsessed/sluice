@@ -100,6 +100,19 @@ export async function regeneratePersonaSystemPrompt(
   channelName: string,
   db: NodePgDatabase<typeof schema> = database
 ): Promise<Persona> {
+  // Confirm the persona row exists BEFORE paying for generation (transcript
+  // query + Claude call) - and so a missing row fails with the documented
+  // 'No persona found' error instead of 'No transcripts found'.
+  const [existing] = await db
+    .select()
+    .from(personas)
+    .where(eq(personas.channelName, channelName))
+    .limit(1)
+
+  if (!existing) {
+    throw new Error(`No persona found for channel "${channelName}"`)
+  }
+
   // Regenerate the system prompt using the v2 builder
   const systemPrompt = await generatePersonaSystemPrompt(channelName, db)
 

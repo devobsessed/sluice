@@ -218,8 +218,10 @@ export async function streamPersonaResponse(
 
   // ── System param ──────────────────────────────────────────────────────────
   // Guard observability (zero/weak-retrieval logging) happens inside buildSystemParam.
+  // Built from limitedContext so the guard assesses the same evidence the model
+  // sees in <context> and the client receives in the sources event.
   // Facts are appended to system (not user turns) to stay cacheable.
-  const system = buildSystemParam(persona, context, facts)
+  const system = buildSystemParam(persona, limitedContext, facts)
 
   // ── Messages array ────────────────────────────────────────────────────────
   // History items become 1:1 alternating user/assistant pairs.
