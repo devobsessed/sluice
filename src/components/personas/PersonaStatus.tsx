@@ -257,12 +257,12 @@ export function PersonaStatus({ onActivePersonasChange }: PersonaStatusProps) {
                 ) : (
                   <>
                     <span className="text-green-600 dark:text-green-400">✓</span>
-                    {/* Staleness badge: size-3 dot, but wrapped in a >= 44px touch target */}
+                    {/* Staleness badge: size-3 dot; 44px hit area via ::before so the pill keeps its natural height */}
                     {isStale && (
                       <button
                         type="button"
                         aria-label={`${delta} new videos since this persona was built - rebuild`}
-                        className="relative flex items-center justify-center min-h-[44px] min-w-[44px] -my-[10px] shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded"
+                        className="relative size-3 shrink-0 cursor-pointer before:absolute before:-inset-4 before:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-full"
                         onClick={() =>
                           setRebuildConfirm({
                             channelName: channel.channelName,
@@ -272,7 +272,7 @@ export function PersonaStatus({ onActivePersonasChange }: PersonaStatusProps) {
                           })
                         }
                       >
-                        <span className="size-3 rounded-full bg-[#059669]" />
+                        <span className="block size-3 rounded-full bg-[#059669]" aria-hidden="true" />
                       </button>
                     )}
                   </>
