@@ -97,20 +97,31 @@ function reciprocalRankFusion(
   keywordResults: SearchResult[],
   k = 60
 ): SearchResult[] {
-  const scores = new Map<number, { result: SearchResult; score: number }>();
+  const scores = new Map<
+    number,
+    { result: SearchResult; score: number; vectorSimilarity?: number }
+  >();
 
-  // Score from vector results
+  // Score from vector results — preserve the raw cosine similarity before the
+  // RRF score overwrites `similarity`. Evidence consumers (persona
+  // weak-retrieval guard) need cosine, not rank arithmetic.
   vectorResults.forEach((result, rank) => {
     const existing = scores.get(result.chunkId);
     const rrfScore = 1 / (k + rank + 1);
     if (existing) {
       existing.score += rrfScore;
+      existing.vectorSimilarity = result.similarity;
     } else {
-      scores.set(result.chunkId, { result, score: rrfScore });
+      scores.set(result.chunkId, {
+        result,
+        score: rrfScore,
+        vectorSimilarity: result.similarity,
+      });
     }
   });
 
-  // Score from keyword results
+  // Score from keyword results — keyword-only chunks carry no cosine evidence
+  // (their `similarity` is the 1.0 literal), so vectorSimilarity stays unset.
   keywordResults.forEach((result, rank) => {
     const existing = scores.get(result.chunkId);
     const rrfScore = 1 / (k + rank + 1);
@@ -124,7 +135,11 @@ function reciprocalRankFusion(
   // Sort by combined score and update similarity to RRF score
   return Array.from(scores.values())
     .sort((a, b) => b.score - a.score)
-    .map(({ result, score }) => ({ ...result, similarity: score }));
+    .map(({ result, score, vectorSimilarity }) => ({
+      ...result,
+      similarity: score,
+      vectorSimilarity,
+    }));
 }
 
 /**
@@ -202,7 +217,10 @@ export async function hybridSearch(
     const embedding = await generateEmbeddingWithRetry(query)
     if (embedding) {
       const embeddingArray = Array.from(embedding)
-      results = await vectorSearch(embeddingArray, limit, 0.3, db, channel)
+      const vectorResults = await vectorSearch(embeddingArray, limit, 0.3, db, channel)
+      // In pure vector mode `similarity` IS the cosine — mirror it so evidence
+      // consumers can rely on vectorSimilarity in every mode.
+      results = vectorResults.map((r) => ({ ...r, vectorSimilarity: r.similarity }))
     } else {
       // Embedding failed — fall back to keyword search
       results = await keywordSearch(query, limit, db, channel)

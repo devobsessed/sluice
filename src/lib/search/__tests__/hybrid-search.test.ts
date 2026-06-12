@@ -1069,6 +1069,61 @@ describe('hybridSearch', () => {
       expect(mockDb._selectChain.where).toHaveBeenCalled()
     })
 
+    it('fusion preserves raw cosine as vectorSimilarity; similarity becomes the RRF score (matrix regression)', async () => {
+      // The 2026-06-11 adversarial matrix found the persona weak-retrieval guard
+      // reading post-fusion `similarity` - which RRF overwrites with rank scores
+      // (~1/61=0.016) - so every query was labeled weak. The cosine evidence must
+      // survive fusion in vectorSimilarity; keyword-only chunks carry none.
+      vi.mocked(vectorSearch).mockResolvedValue([
+        {
+          chunkId: 30,
+          content: 'On-topic vector result',
+          startTime: 0,
+          endTime: 10,
+          similarity: 0.87, // cosine from the vector leg
+          videoId: 30,
+          videoTitle: 'Topic Video',
+          channel: 'Niche Creator',
+          youtubeId: 'vid-30',
+          thumbnail: null,
+          publishedAt: null,
+        },
+      ])
+      mockDb._selectChain.limit.mockResolvedValue([
+        {
+          chunkId: 31,
+          content: 'Keyword-only result',
+          startTime: 5,
+          endTime: 15,
+          similarity: '1.0', // keyword leg literal - NOT cosine evidence
+          videoId: 30,
+          videoTitle: 'Topic Video',
+          channel: 'Niche Creator',
+          youtubeId: 'vid-30',
+          thumbnail: null,
+          publishedAt: null,
+        },
+      ])
+
+      const { results } = await hybridSearch(
+        'topic query',
+        { mode: 'hybrid', limit: 10 },
+        mockDb as unknown as NodePgDatabase<typeof schema>,
+      )
+
+      const vectorChunk = results.find((r) => r.chunkId === 30)
+      const keywordChunk = results.find((r) => r.chunkId === 31)
+
+      expect(vectorChunk).toBeDefined()
+      // similarity is now the RRF score (rank arithmetic, ~0.016 for rank 1)
+      expect(vectorChunk!.similarity).toBeLessThan(0.1)
+      // cosine preserved on the side channel
+      expect(vectorChunk!.vectorSimilarity).toBe(0.87)
+
+      expect(keywordChunk).toBeDefined()
+      expect(keywordChunk!.vectorSimilarity).toBeUndefined()
+    })
+
     it('degraded fallback keeps channel scope - no silent global on embedding failure', async () => {
       // Force both embedding attempts to fail so the fallback path triggers.
       const mockGenerate = vi.mocked(generateEmbedding)

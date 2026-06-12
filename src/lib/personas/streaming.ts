@@ -7,11 +7,24 @@ import { streamMessages } from '@/lib/claude/client'
 // ── Weak-retrieval thresholds (named consts; values tune during adversarial pass) ──
 // These are NEVER emitted to the model as numbers - they gate which instruction text to use.
 
-/** Minimum number of retrieved chunks to be considered non-weak */
-const WEAK_RETRIEVAL_MIN_COUNT = 3
+/** Minimum raw cosine similarity (vector leg) for a chunk to count as strong evidence.
+ *
+ * Calibrated 2026-06-11 during the adversarial matrix against the real corpus
+ * (all-MiniLM-L6-v2). This model's cosine floor is HIGH - completely alien
+ * queries score ~0.60 against a dense corpus, so the discriminating band is
+ * narrow (~0.60-0.75). Observed evidence (persona 1, top channel cosine):
+ *   dead-on specific  ("OpenClaw hire")          0.746  -> strong
+ *   dead-on specific  ("5 levels of AI coding")  0.725  -> strong
+ *   ambiguous on-domain ("what should I focus")  0.674  -> weak (soft signal + ask-back by design)
+ *   off-domain specific (Kubernetes autoscaling) 0.671  -> weak (honest deflection)
+ *   alien             (sourdough hydration)      0.599  -> weak
+ * Re-calibrate if the embedding model changes. */
+const WEAK_RETRIEVAL_MIN_SIMILARITY = 0.68
 
-/** Minimum top-similarity score to be considered non-weak */
-const WEAK_RETRIEVAL_MIN_SIMILARITY = 0.4
+/** Minimum number of strong-evidence chunks (cosine >= MIN_SIMILARITY) to be considered non-weak.
+ * Raw row count is NOT a signal: channel-scoped search fills to its limit for any
+ * populated channel regardless of relevance. We count evidence, not rows. */
+const WEAK_RETRIEVAL_MIN_STRONG = 2
 
 /**
  * Estimates token count (rough approximation: 1 token ~ 4 characters)
@@ -40,13 +53,30 @@ function limitContextTokens(context: SearchResult[], maxTokens = 3000): SearchRe
 }
 
 /**
- * Computes whether retrieval is weak (low chunk count and/or low top similarity).
- * Both conditions must hold for weak-retrieval branch to fire.
+ * Evidence summary for the weak-retrieval gate, computed from RAW vector-leg
+ * cosine similarities (`vectorSimilarity`) - NEVER the post-fusion `similarity`
+ * field, which holds RRF rank scores (~0.016-0.03) after hybrid fusion.
+ */
+function retrievalEvidence(context: SearchResult[]): { topVectorSim: number; strongCount: number } {
+  const cosines = context
+    .map(r => r.vectorSimilarity)
+    .filter((s): s is number => typeof s === 'number')
+  const topVectorSim = cosines.length > 0 ? Math.max(...cosines) : 0
+  const strongCount = cosines.filter(s => s >= WEAK_RETRIEVAL_MIN_SIMILARITY).length
+  return { topVectorSim, strongCount }
+}
+
+/**
+ * Computes whether retrieval is weak based on cosine EVIDENCE, not row count.
+ * Weak when the best cosine is below the floor, or fewer than
+ * WEAK_RETRIEVAL_MIN_STRONG chunks clear it. Results with no vector evidence
+ * at all (keyword-only / degraded path) count as weak - conservative per the
+ * locked "Weak Retrieval Must Announce Itself" principle.
  */
 function isWeakRetrieval(context: SearchResult[]): boolean {
   if (context.length === 0) return false // zero-retrieval is its own branch
-  const topSimilarity = Math.max(...context.map(r => r.similarity))
-  return context.length < WEAK_RETRIEVAL_MIN_COUNT || topSimilarity < WEAK_RETRIEVAL_MIN_SIMILARITY
+  const { topVectorSim, strongCount } = retrievalEvidence(context)
+  return topVectorSim < WEAK_RETRIEVAL_MIN_SIMILARITY || strongCount < WEAK_RETRIEVAL_MIN_STRONG
 }
 
 /**
@@ -108,8 +138,8 @@ function buildSystemCore(
   if (context.length === 0) {
     console.debug('[persona-guard] zero-retrieval fired', { personaId: persona.id, channel: persona.channelName })
   } else if (isWeakRetrieval(context)) {
-    const topSim = Math.max(...context.map(r => r.similarity))
-    console.debug(`[persona-guard] weak-retrieval fired count=${context.length} topSim=${topSim.toFixed(3)}`, { personaId: persona.id })
+    const { topVectorSim, strongCount } = retrievalEvidence(context)
+    console.debug(`[persona-guard] weak-retrieval fired rows=${context.length} topVectorSim=${topVectorSim.toFixed(3)} strongCount=${strongCount}`, { personaId: persona.id })
   }
 
   if (context.length === 0) {

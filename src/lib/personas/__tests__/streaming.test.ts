@@ -69,7 +69,11 @@ describe('streamPersonaResponse', () => {
       channel: 'Test Channel',
       youtubeId: 'abc123',
       thumbnail: null,
-      similarity: 0.92,
+      // Post-fusion shape: `similarity` is the RRF rank score; the cosine
+      // evidence lives in vectorSimilarity (the regression that prompted this:
+      // the guard must never read the RRF score as similarity).
+      similarity: 0.032,
+      vectorSimilarity: 0.92,
     },
     {
       chunkId: 2,
@@ -81,7 +85,8 @@ describe('streamPersonaResponse', () => {
       channel: 'Test Channel',
       youtubeId: 'abc123',
       thumbnail: null,
-      similarity: 0.88,
+      similarity: 0.016,
+      vectorSimilarity: 0.88,
     },
     {
       chunkId: 3,
@@ -93,7 +98,8 @@ describe('streamPersonaResponse', () => {
       channel: 'Test Channel',
       youtubeId: 'def456',
       thumbnail: null,
-      similarity: 0.85,
+      similarity: 0.015,
+      vectorSimilarity: 0.85,
     },
   ]
 
@@ -108,7 +114,8 @@ describe('streamPersonaResponse', () => {
       channel: 'Test Channel',
       youtubeId: 'abc123',
       thumbnail: null,
-      similarity: 0.28, // below the weak threshold
+      similarity: 0.016,
+      vectorSimilarity: 0.28, // cosine below the weak threshold
     },
   ]
 
@@ -732,11 +739,49 @@ describe('streamPersonaResponse', () => {
     const guardLog = calls.find(c => c.includes('[persona-guard]'))
     expect(guardLog).toBeDefined()
     expect(guardLog).toMatch(/weak.retrieval/i)
-    // Log should include count and top similarity
-    expect(guardLog).toMatch(/count=/)
-    expect(guardLog).toMatch(/topSim=/)
+    // Log records the cosine evidence (vector-leg), not the RRF score
+    expect(guardLog).toMatch(/topVectorSim=/)
+    expect(guardLog).toMatch(/strongCount=/)
 
     consoleSpy.mockRestore()
+  })
+
+  it('weak gate reads cosine evidence, never the post-fusion RRF score (matrix regression)', async () => {
+    // The 2026-06-11 adversarial matrix found the guard reading post-fusion
+    // `similarity` (RRF rank scores ~0.016) so weak fired on EVERY query.
+    // strongContext models the real post-fusion shape: similarity = RRF score,
+    // vectorSimilarity = cosine. The gate must see this as STRONG.
+    const mockStream = createMockStream({ finalContent: 'Response' })
+    mockStreamMessages.mockReturnValue(mockStream as never)
+
+    await streamPersonaResponse({
+      persona: mockPersona,
+      question: 'What is TypeScript?',
+      context: strongContext, // similarity values are all < 0.04 (RRF range)
+    })
+
+    const callArgs = mockStreamMessages.mock.calls[0]?.[0] as { system: string }
+    expect(callArgs.system).not.toMatch(/retrieved context appears limited/i)
+  })
+
+  it('keyword-only context (no vector evidence) counts as weak - conservative per locked principle', async () => {
+    const mockStream = createMockStream({ finalContent: 'Response' })
+    mockStreamMessages.mockReturnValue(mockStream as never)
+
+    const keywordOnlyContext: SearchResult[] = strongContext.map((r) => ({
+      ...r,
+      similarity: 1.0, // keyword leg literal
+      vectorSimilarity: undefined,
+    }))
+
+    await streamPersonaResponse({
+      persona: mockPersona,
+      question: 'What is TypeScript?',
+      context: keywordOnlyContext,
+    })
+
+    const callArgs = mockStreamMessages.mock.calls[0]?.[0] as { system: string }
+    expect(callArgs.system).toMatch(/retrieved context appears limited/i)
   })
 
   it('logs nothing for strong retrieval', async () => {
