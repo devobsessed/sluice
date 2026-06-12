@@ -3,7 +3,7 @@ import {
   loadChatStorage,
   saveChatStorage,
   clearChatStorage,
-  addFactsToStorage,
+  replaceFacts,
   removeFact as removeFact_,
   clearFacts as clearFacts_,
   isChatMessage,
@@ -375,8 +375,10 @@ export function usePersonaChat(personaId: number, _channelName: string): UsePers
         return
       }
 
-      // Write new facts to storage and update hook state
-      const updated = addFactsToStorage(personaId, newFacts)
+      // Write new facts to storage and update hook state.
+      // REPLACE, don't append: the server's distillFacts already merged
+      // existingFacts in - appending would double-merge into duplicates.
+      const updated = replaceFacts(personaId, newFacts)
       setStorage(updated)
 
       // Signal the marker: add this boundary's timestamp to the remembered set

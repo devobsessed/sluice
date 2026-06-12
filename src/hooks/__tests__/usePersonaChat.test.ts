@@ -1171,6 +1171,39 @@ describe('usePersonaChat', () => {
     })
   })
 
+  it('compression REPLACES facts with the server-merged set (no double-merge duplicates)', async () => {
+    // Existing facts overlap with the server's merged response - the server
+    // already merged existingFacts in, so the hook must replace, not append.
+    const existingFacts = ['values type safety', 'building an agent']
+    localStorageStore[STORAGE_KEY] = JSON.stringify({
+      version: 3,
+      entries: [
+        { question: 'Q', answer: 'A', timestamp: 1000 },
+      ],
+      facts: existingFacts,
+    })
+
+    const serverMerged = ['values type safety', 'building an agent', 'exploring workflows']
+    mockFetch.mockImplementation((url: string) =>
+      String(url).includes('/compress-thread')
+        ? Promise.resolve(mockCompressResponse(serverMerged))
+        : Promise.resolve(mockSseResponse([{ type: 'done' }]))
+    )
+
+    const { result } = renderHook(() => usePersonaChat(PERSONA_ID, 'Test Channel'))
+
+    act(() => {
+      result.current.startNewThread()
+    })
+
+    await waitFor(() => {
+      expect(result.current.facts).toEqual(serverMerged)
+    })
+    // The regression: appending would have produced 5 entries with duplicates
+    expect(result.current.facts).toHaveLength(3)
+    expect(new Set(result.current.facts).size).toBe(result.current.facts.length)
+  })
+
   it('failed compression (null return) leaves facts untouched and no marker', async () => {
     // Existing facts in storage
     const existingFacts = ['existing fact']

@@ -279,6 +279,26 @@ export function addFactsToStorage(
 }
 
 /**
+ * Replaces the persona's stored facts with an already-merged set (e.g. the
+ * reconciled result returned by the compress-thread endpoint, which has the
+ * existing facts merged in server-side). Dedupes preserving first occurrence
+ * and applies the MAX_FACTS cap as a backstop. Saves and returns the updated
+ * v3 envelope. Use this - NOT addFactsToStorage - when the input set already
+ * contains the existing facts, or they get double-merged into duplicates.
+ */
+export function replaceFacts(
+  personaId: number,
+  facts: string[]
+): ChatStorageV3 {
+  const storage = loadChatStorage(personaId)
+  const deduped = [...new Set(facts)]
+  const capped = deduped.slice(-MAX_FACTS)
+  const updated: ChatStorageV3 = { ...storage, facts: capped }
+  saveChatStorage(personaId, updated)
+  return updated
+}
+
+/**
  * Removes a single fact by exact string match.
  * Saves and returns the updated v3 envelope.
  */

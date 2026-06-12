@@ -7,6 +7,7 @@ import {
   getAllPersonaChatIds,
   clearChatStorage,
   addFactsToStorage,
+  replaceFacts,
   removeFact,
   clearFacts,
   isThreadBoundary,
@@ -380,6 +381,39 @@ describe('addFactsToStorage', () => {
     addFactsToStorage(1, ['persisted fact'])
     const saved = JSON.parse(store['persona-chat:1']!) as ChatStorageV3
     expect(saved.facts).toEqual(['persisted fact'])
+  })
+})
+
+describe('replaceFacts', () => {
+  it('replaces existing facts instead of appending (no double-merge duplicates)', () => {
+    // The compress-thread endpoint returns the MERGED set (existing facts went
+    // into the request). Replacing must not re-append the existing facts.
+    const v3Data: ChatStorageV3 = {
+      version: 3,
+      entries: [],
+      facts: ['values type safety', 'building an agent'],
+    }
+    store['persona-chat:1'] = JSON.stringify(v3Data)
+    const merged = ['values type safety', 'building an agent', 'exploring workflows']
+    const result = replaceFacts(1, merged)
+    expect(result.facts).toEqual(merged)
+  })
+
+  it('dedupes the incoming set preserving first occurrence', () => {
+    const result = replaceFacts(1, ['a', 'b', 'a', 'c'])
+    expect(result.facts).toEqual(['a', 'b', 'c'])
+  })
+
+  it('applies the MAX_FACTS cap as a backstop', () => {
+    const result = replaceFacts(1, ['f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7'])
+    expect(result.facts).toHaveLength(MAX_FACTS)
+    expect(result.facts).toEqual(['f3', 'f4', 'f5', 'f6', 'f7'])
+  })
+
+  it('persists to localStorage', () => {
+    replaceFacts(1, ['replaced fact'])
+    const saved = JSON.parse(store['persona-chat:1']!) as ChatStorageV3
+    expect(saved.facts).toEqual(['replaced fact'])
   })
 })
 
